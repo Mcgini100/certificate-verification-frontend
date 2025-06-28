@@ -46,7 +46,7 @@ const Layout = ({ children }) => {
   };
 
   return (
-    <div className="min-h-screen bg-secondary-50">
+    <div className="min-h-screen bg-secondary-50 flex">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div 
@@ -57,28 +57,28 @@ const Layout = ({ children }) => {
 
       {/* Sidebar */}
       <div className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-50 w-72 bg-white shadow-lg transform transition-transform duration-300 ease-in-out flex flex-col
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         lg:translate-x-0 lg:static lg:inset-0
       `}>
         {/* Sidebar Header */}
-        <div className="flex items-center justify-between h-16 px-6 border-b border-secondary-200 bg-white">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <Shield className="h-5 w-5 text-white" />
+        <div className="flex items-center justify-between h-16 px-6 border-b border-secondary-200 bg-white flex-shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
+              <Shield className="h-6 w-6 text-white" />
             </div>
             <span className="text-xl font-bold text-secondary-900">CertVerify</span>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-1 rounded-md hover:bg-secondary-100 transition-colors"
+            className="lg:hidden p-2 rounded-md hover:bg-secondary-100 transition-colors"
           >
             <X className="h-5 w-5 text-secondary-600" />
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-2">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = isActivePath(item.path);
@@ -91,26 +91,26 @@ const Layout = ({ children }) => {
                   setSidebarOpen(false);
                 }}
                 className={`
-                  w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200
+                  w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group
                   ${isActive 
                     ? 'bg-primary-600 text-white shadow-md' 
                     : 'text-secondary-700 hover:bg-secondary-100 hover:text-secondary-900'
                   }
                 `}
               >
-                <Icon className="mr-3 h-5 w-5" />
-                {item.label}
+                <Icon className={`mr-3 h-5 w-5 ${isActive ? 'text-white' : 'text-secondary-500 group-hover:text-secondary-700'}`} />
+                <span className="truncate">{item.label}</span>
               </button>
             );
           })}
         </nav>
 
         {/* User info and logout */}
-        <div className="border-t border-secondary-200 p-4">
+        <div className="border-t border-secondary-200 p-4 flex-shrink-0">
           <div className="flex items-center space-x-3 mb-4">
             <div className="flex-shrink-0">
-              <div className="h-10 w-10 bg-secondary-200 rounded-full flex items-center justify-center">
-                <User className="h-6 w-6 text-secondary-600" />
+              <div className="h-12 w-12 bg-secondary-200 rounded-full flex items-center justify-center">
+                <User className="h-7 w-7 text-secondary-600" />
               </div>
             </div>
             <div className="flex-1 min-w-0">
@@ -129,18 +129,18 @@ const Layout = ({ children }) => {
           </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
+            className="w-full flex items-center px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
           >
-            <LogOut className="mr-3 h-4 w-4" />
+            <LogOut className="mr-3 h-5 w-5" />
             Sign Out
           </button>
         </div>
       </div>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <div className="sticky top-0 z-30 flex h-16 items-center justify-between bg-white border-b border-secondary-200 px-4 shadow-sm">
+        <div className="sticky top-0 z-30 flex h-16 items-center justify-between bg-white border-b border-secondary-200 px-4 shadow-sm lg:px-6">
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -165,7 +165,7 @@ const Layout = ({ children }) => {
         </div>
 
         {/* Page content */}
-        <main className="flex-1">
+        <main className="flex-1 overflow-auto">
           <div className="py-6">
             {children}
           </div>
