@@ -3,16 +3,22 @@ import {
   Search, 
   Filter, 
   Download, 
+  Trash2, 
   Eye, 
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
   AlertCircle,
-  Image as ImageIcon
+  FileText,
+  User,
+  Shield,
+  Settings,
+  Clock,
+  History
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getCertificates, getCertificateHistory, downloadProcessedCertificate, downloadOriginalCertificate } from '../../services/api';
+import { getCertificates, deleteCertificate, getCertificateHistory, downloadProcessedCertificate, downloadOriginalCertificate } from '../../services/api';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import Modal from '../../components/common/Modal';
 import { toast } from 'react-toastify';
@@ -43,6 +49,7 @@ const AdminDatabase = () => {
   const [certHistory, setCertHistory] = useState([]);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -61,6 +68,20 @@ const AdminDatabase = () => {
     fetchCertificates();
   }, [currentPage, sortBy, sortOrder, statusFilter, searchTerm]);
 
+  const applyFilters = () => {
+    fetchCertificates(true); // Reset to first page when applying filters
+  };
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setDateRange({ start: '', end: '' });
+    setConfidenceRange({ min: 0, max: 100 });
+    setFacultyFilter('all');
+    setCurrentPage(1);
+    fetchCertificates(true);
+  };
+
   const fetchCertificates = async (resetPage = false) => {
     try {
       setLoading(true);
@@ -77,243 +98,295 @@ const AdminDatabase = () => {
         sortOrder: sortOrder,
         search: searchTerm || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        startDate: dateRange.start || undefined,
-        endDate: dateRange.end || undefined,
-        minConfidence: confidenceRange.min / 100,
-        maxConfidence: confidenceRange.max / 100,
-        faculty: facultyFilter !== 'all' ? facultyFilter : undefined
+        faculty: facultyFilter !== 'all' ? facultyFilter : undefined,
+        start_date: dateRange.start || undefined,
+        end_date: dateRange.end || undefined,
+        min_confidence: confidenceRange.min > 0 ? confidenceRange.min / 100 : undefined,
+        max_confidence: confidenceRange.max < 100 ? confidenceRange.max / 100 : undefined
       };
 
-      // Remove undefined values
-      Object.keys(params).forEach(key => {
-        if (params[key] === undefined) {
-          delete params[key];
-        }
-      });
-
-      const response = await getCertificates(params);
+      console.log('📊 Fetching certificates with params:', params);
       
-      // Handle different response formats
-      if (response.certificates) {
-        // Paginated response
+      const response = await getCertificates(params);
+      console.log('✅ Certificates response:', response);
+      
+      if (response && response.certificates) {
         setCertificates(response.certificates);
         setTotalCount(response.total || response.certificates.length);
         setTotalPages(Math.ceil((response.total || response.certificates.length) / itemsPerPage));
-      } else if (Array.isArray(response)) {
-        // Simple array response
-        setCertificates(response);
-        setTotalCount(response.length);
-        setTotalPages(Math.ceil(response.length / itemsPerPage));
       } else {
-        // Handle unexpected response format
-        console.warn('Unexpected response format:', response);
-        setCertificates([]);
-        setTotalCount(0);
-        setTotalPages(1);
+        console.warn('⚠️ Unexpected response format:', response);
+        setCertificates(response || []);
+        setTotalCount((response || []).length);
+        setTotalPages(Math.ceil((response || []).length / itemsPerPage));
       }
       
     } catch (error) {
-      console.error('Failed to fetch certificates:', error);
+      console.error('❌ Error fetching certificates:', error);
       setApiConnected(false);
-      
-      // Only show empty state when API is not connected
       setCertificates([]);
-      setTotalCount(0);
-      setTotalPages(1);
-      
-      if (error.code !== 'ECONNREFUSED' && !error.message.includes('Network Error')) {
-        toast.error('Failed to fetch certificates');
-      }
+      toast.error('Failed to fetch certificates. Check if the API is running.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('desc');
+    }
+  };
+
+  const handleSearch = (e) => {
+    setSearchTerm(e.target.value);
+    setCurrentPage(1);
+  };
+
+  const handleStatusFilter = (status) => {
+    setStatusFilter(status);
+    setCurrentPage(1);
+    // The useEffect will trigger fetchCertificates
+  };
+
   const handleViewDetails = async (cert) => {
     setSelectedCert(cert);
-    setLoadingHistory(true);
+    setShowDetailsModal(true);
     
+    // Fetch verification history for this certificate
     try {
-      // Fetch verification history from API
       const history = await getCertificateHistory(cert.certificate_number);
-      setCertHistory(Array.isArray(history) ? history : []);
+      setSelectedCert(prev => ({ ...prev, verification_history: history || [] }));
     } catch (error) {
-      console.error('Failed to fetch certificate history:', error);
-      setCertHistory([]);
+      console.error('Error fetching certificate history:', error);
+      setSelectedCert(prev => ({ ...prev, verification_history: [] }));
+    }
+  };
+
+  const handleViewHistory = async (cert) => {
+    setLoadingHistory(true);
+    try {
+      const history = await getCertificateHistory(cert.certificate_number);
+      setSelectedCert({ ...cert, verification_history: history });
+      setShowDetailsModal(true);
+    } catch (error) {
+      console.error('Error fetching history:', error);
+      toast.error('Failed to fetch verification history');
     } finally {
       setLoadingHistory(false);
     }
+  };
+
+  const handleDownload = async (cert, type = 'processed') => {
+    try {
+      let response;
+      if (type === 'original') {
+        response = await downloadOriginalCertificate(cert.certificate_number);
+      } else {
+        response = await downloadProcessedCertificate(cert.certificate_number);
+      }
+      
+      // Create blob and download
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${cert.certificate_number}_${type}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`${type} certificate downloaded successfully`);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error(`Failed to download ${type} certificate`);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedCert) return;
     
-    setShowDetailsModal(true);
-  };
-
-  const handleDownloadProcessed = async (cert) => {
     try {
-      await downloadProcessedCertificate(cert.certificate_number, {
-        includeMarkers: true,
-        format: 'png'
-      });
+      await deleteCertificate(selectedCert.certificate_number);
+      toast.success('Certificate deleted successfully');
+      setShowDeleteModal(false);
+      setSelectedCert(null);
+      fetchCertificates();
     } catch (error) {
-      console.error('Failed to download processed certificate:', error);
-    }
-  };
-
-  const handleDownloadOriginal = async (cert) => {
-    try {
-      await downloadOriginalCertificate(cert.certificate_number, {
-        format: 'png'
-      });
-    } catch (error) {
-      console.error('Failed to download original certificate:', error);
-    }
-  };
-
-  const refreshData = () => {
-    fetchCertificates();
-  };
-
-  const applyFilters = () => {
-    setCurrentPage(1);
-    fetchCertificates(true);
-  };
-
-  const resetFilters = () => {
-    setSearchTerm('');
-    setStatusFilter('all');
-    setDateRange({ start: '', end: '' });
-    setConfidenceRange({ min: 0, max: 100 });
-    setFacultyFilter('all');
-    setCurrentPage(1);
-    fetchCertificates(true);
-  };
-
-  const exportCertificates = async () => {
-    try {
-      // This would implement CSV/Excel export
-      toast.info('Export functionality will be implemented');
-    } catch (error) {
-      toast.error('Export failed');
+      console.error('Delete error:', error);
+      toast.error('Failed to delete certificate');
     }
   };
 
   const getStatusBadge = (status) => {
-    const statusClasses = {
-      'VERIFIED': 'bg-green-100 text-green-800',
-      'VERIFIED_BY_DATA': 'bg-blue-100 text-blue-800',
-      'FAILED': 'bg-red-100 text-red-800',
-      'CORRUPTED_HASH': 'bg-yellow-100 text-yellow-800'
+    const statusConfig = {
+      'VERIFIED': { color: 'bg-green-100 text-green-800', text: 'Verified' },
+      'VERIFIED_BY_DATA': { color: 'bg-blue-100 text-blue-800', text: 'Verified by Data' },
+      'FAILED': { color: 'bg-red-100 text-red-800', text: 'Failed' },
+      'CORRUPTED_HASH': { color: 'bg-yellow-100 text-yellow-800', text: 'Corrupted Hash' },
+      'NO_HASH': { color: 'bg-gray-100 text-gray-800', text: 'No Hash' },
+      'UNKNOWN': { color: 'bg-gray-100 text-gray-800', text: 'Unknown' }
     };
     
+    const config = statusConfig[status] || statusConfig['UNKNOWN'];
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClasses[status] || 'bg-gray-100 text-gray-800'}`}>
-        {status}
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
+        {config.text}
       </span>
     );
   };
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleString();
+    try {
+      return new Date(dateString).toLocaleString();
+    } catch {
+      return dateString;
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <LoadingSpinner size="large" />
-      </div>
-    );
-  }
+  // Get unique faculties from certificates for filter options
+  const getUniqueFaculties = () => {
+    const faculties = new Set();
+    certificates.forEach(cert => {
+      const faculty = cert.certificate_data?.['Faculty Name'];
+      if (faculty) faculties.add(faculty);
+    });
+    return Array.from(faculties).sort();
+  };
+
+  const displayCertificates = certificates;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-center"
-      >
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Certificate Database</h1>
-          <p className="text-secondary-600 mt-1">
-            {apiConnected ? `${totalCount} certificates in the system` : 'No certificates found'}
-          </p>
-        </div>
-        <div className="flex space-x-3">
-          <button
-            onClick={refreshData}
-            className="btn-secondary flex items-center"
-            disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={exportCertificates}
-            className="btn-secondary flex items-center"
-            disabled={!apiConnected || certificates.length === 0}
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </button>
-        </div>
-      </motion.div>
-
-      {/* Search and Filters */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="mb-6"
+        className="mb-8"
       >
-        <div className="flex flex-col sm:flex-row gap-4 mb-4">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-secondary-400" />
-            <input
-              type="text"
-              placeholder="Search by certificate number, student name, or degree..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && applyFilters()}
-              className="form-input pl-10"
-            />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-secondary-900">Certificate Database</h1>
+            <p className="mt-2 text-secondary-600">
+              Manage and view all certificates in the system
+            </p>
           </div>
-
-          {/* Quick Filters */}
-          <div className="flex gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="form-select min-w-[120px]"
+          <div className="mt-4 sm:mt-0 flex items-center space-x-3">
+            <button
+              onClick={() => fetchCertificates(true)}
+              className="btn-secondary flex items-center"
+              disabled={loading}
             >
-              <option value="all">All Status</option>
-              <option value="VERIFIED">Verified</option>
-              <option value="VERIFIED_BY_DATA">Verified by Data</option>
-              <option value="FAILED">Failed</option>
-              <option value="CORRUPTED_HASH">Corrupted Hash</option>
-            </select>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
 
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="card">
+            <div className="flex items-center">
+              <FileText className="h-8 w-8 text-primary-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-secondary-600">Total Certificates</p>
+                <p className="text-2xl font-bold text-secondary-900">{totalCount}</p>
+              </div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="flex items-center">
+              <Shield className="h-8 w-8 text-green-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-secondary-600">Verified</p>
+                <p className="text-2xl font-bold text-secondary-900">
+                  {certificates.filter(c => c.verification_status === 'VERIFIED' || c.verification_status === 'VERIFIED_BY_DATA').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="flex items-center">
+              <AlertCircle className="h-8 w-8 text-red-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-secondary-600">Failed</p>
+                <p className="text-2xl font-bold text-secondary-900">
+                  {certificates.filter(c => c.verification_status === 'FAILED').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="flex items-center">
+              <Clock className="h-8 w-8 text-blue-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-secondary-600">Processing</p>
+                <p className="text-2xl font-bold text-secondary-900">
+                  {certificates.filter(c => c.verification_status === 'UNKNOWN').length}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Search and Filters */}
+        <div className="card mb-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
+            {/* Search */}
+            <div className="flex-1 max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-secondary-400" />
+                <input
+                  type="text"
+                  placeholder="Search certificates..."
+                  value={searchTerm}
+                  onChange={handleSearch}
+                  className="form-input pl-10"
+                />
+              </div>
+            </div>
+
+            {/* Status Filter */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-medium text-secondary-700">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => handleStatusFilter(e.target.value)}
+                className="form-input min-w-40"
+              >
+                <option value="all">All Status</option>
+                <option value="VERIFIED">Verified</option>
+                <option value="VERIFIED_BY_DATA">Verified by Data</option>
+                <option value="FAILED">Failed</option>
+                <option value="CORRUPTED_HASH">Corrupted Hash</option>
+                <option value="NO_HASH">No Hash</option>
+                <option value="UNKNOWN">Unknown</option>
+              </select>
+            </div>
+
+            {/* Advanced Filters Button */}
             <button
               onClick={() => setShowFilterModal(true)}
               className="btn-secondary flex items-center"
             >
               <Filter className="h-4 w-4 mr-2" />
               Advanced
+              {(dateRange.start || dateRange.end || confidenceRange.min > 0 || confidenceRange.max < 100 || facultyFilter !== 'all') && (
+                <span className="ml-2 w-2 h-2 bg-primary-600 rounded-full"></span>
+              )}
             </button>
 
-            <button
-              onClick={applyFilters}
-              className="btn-primary"
-            >
-              Search
-            </button>
-
-            {(searchTerm || statusFilter !== 'all' || dateRange.start || dateRange.end) && (
+            {/* Clear Filters */}
+            {(searchTerm || statusFilter !== 'all' || dateRange.start || dateRange.end || confidenceRange.min > 0 || confidenceRange.max < 100 || facultyFilter !== 'all') && (
               <button
-                onClick={resetFilters}
+                onClick={clearFilters}
                 className="btn-secondary text-red-600 hover:text-red-700"
               >
-                Reset
+                Clear Filters
               </button>
             )}
           </div>
@@ -322,70 +395,52 @@ const AdminDatabase = () => {
 
       {/* Certificates Table */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}
         className="card overflow-hidden"
       >
-        {certificates.length > 0 ? (
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : displayCertificates.length > 0 ? (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="min-w-full divide-y divide-secondary-200">
                 <thead className="bg-secondary-50">
                   <tr>
-                    <th 
+                    <th
                       className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider cursor-pointer hover:bg-secondary-100"
-                      onClick={() => {
-                        const newOrder = sortBy === 'certificate_number' && sortOrder === 'asc' ? 'desc' : 'asc';
-                        setSortBy('certificate_number');
-                        setSortOrder(newOrder);
-                      }}
+                      onClick={() => handleSort('certificate_number')}
                     >
-                      <div className="flex items-center">
-                        Certificate Number
-                        <ChevronDown className="h-4 w-4 ml-1" />
+                      <div className="flex items-center space-x-1">
+                        <span>Certificate Number</span>
+                        <ChevronDown className="h-4 w-4" />
                       </div>
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider">
-                      Student Info
+                      Student Name
                     </th>
-                    <th 
+                    <th className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th
                       className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider cursor-pointer hover:bg-secondary-100"
-                      onClick={() => {
-                        const newOrder = sortBy === 'verification_status' && sortOrder === 'asc' ? 'desc' : 'asc';
-                        setSortBy('verification_status');
-                        setSortOrder(newOrder);
-                      }}
+                      onClick={() => handleSort('confidence')}
                     >
-                      <div className="flex items-center">
-                        Status
-                        <ChevronDown className="h-4 w-4 ml-1" />
+                      <div className="flex items-center space-x-1">
+                        <span>Confidence</span>
+                        <ChevronDown className="h-4 w-4" />
                       </div>
                     </th>
-                    <th 
+                    <th
                       className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider cursor-pointer hover:bg-secondary-100"
-                      onClick={() => {
-                        const newOrder = sortBy === 'confidence' && sortOrder === 'asc' ? 'desc' : 'asc';
-                        setSortBy('confidence');
-                        setSortOrder(newOrder);
-                      }}
+                      onClick={() => handleSort('created_at')}
                     >
-                      <div className="flex items-center">
-                        Confidence
-                        <ChevronDown className="h-4 w-4 ml-1" />
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider cursor-pointer hover:bg-secondary-100"
-                      onClick={() => {
-                        const newOrder = sortBy === 'created_at' && sortOrder === 'desc' ? 'asc' : 'desc';
-                        setSortBy('created_at');
-                        setSortOrder(newOrder);
-                      }}
-                    >
-                      <div className="flex items-center">
-                        Created
-                        <ChevronDown className="h-4 w-4 ml-1" />
+                      <div className="flex items-center space-x-1">
+                        <span>Created</span>
+                        <ChevronDown className="h-4 w-4" />
                       </div>
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-secondary-500 uppercase tracking-wider">
@@ -394,48 +449,43 @@ const AdminDatabase = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-secondary-200">
-                  {certificates.map((cert, index) => (
+                  {displayCertificates.map((cert, index) => (
                     <tr key={cert.certificate_number || index} className="hover:bg-secondary-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-secondary-900">
-                          {cert.certificate_number || 'Unknown'}
+                          {cert.certificate_number || 'N/A'}
                         </div>
-                        {cert.hash && (
-                          <div className="text-xs text-secondary-500 font-mono">
-                            {cert.hash.substring(0, 16)}...
-                          </div>
-                        )}
+                        <div className="text-sm text-secondary-500 truncate max-w-xs">
+                          {cert.hash ? `${cert.hash.substring(0, 20)}...` : 'No hash'}
+                        </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-secondary-900">
-                          {safeRenderValue(cert.certificate_data?.['Student Name']) || 'Unknown Student'}
+                          {cert.certificate_data?.['Student Name'] || 
+                           cert.certificate_data?.['student_name'] || 
+                           'N/A'}
                         </div>
                         <div className="text-sm text-secondary-500">
-                          {cert.certificate_data?.['Degree Name']?.substring(0, 50) || 'Unknown Degree'}
-                          {cert.certificate_data?.['Degree Name']?.length > 50 && '...'}
-                        </div>
-                        <div className="text-xs text-secondary-500">
-                          {safeRenderValue(cert.certificate_data?.['Faculty Name']) || 'Unknown Faculty'}
+                          {cert.certificate_data?.['Institution Name'] || 
+                           cert.certificate_data?.['institution_name'] || 
+                           'N/A'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {getStatusBadge(cert.verification_status)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-secondary-900">
-                          {cert.confidence ? 
-                            `${Math.round(cert.confidence * 100)}%` : 
-                            'N/A'
-                          }
-                        </div>
-                        {cert.confidence && (
-                          <div className="w-full bg-secondary-200 rounded-full h-2 mt-1">
+                        <div className="flex items-center">
+                          <div className="w-16 bg-secondary-200 rounded-full h-2 mr-2">
                             <div 
-                              className="bg-blue-600 h-2 rounded-full" 
-                              style={{ width: `${cert.confidence * 100}%` }}
+                              className="bg-green-600 h-2 rounded-full transition-all duration-300" 
+                              style={{ width: `${(cert.confidence || 0) * 100}%` }}
                             ></div>
                           </div>
-                        )}
+                          <span className="text-sm text-secondary-900">
+                            {cert.confidence ? `${Math.round(cert.confidence * 100)}%` : 'N/A'}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-secondary-500">
                         {formatDate(cert.created_at)}
@@ -444,38 +494,18 @@ const AdminDatabase = () => {
                         <div className="flex items-center justify-end space-x-2">
                           <button
                             onClick={() => handleViewDetails(cert)}
-                            className="text-indigo-600 hover:text-indigo-900"
+                            className="text-primary-600 hover:text-primary-900 p-1 rounded"
                             title="View Details"
                           >
                             <Eye className="h-4 w-4" />
                           </button>
-                          <div className="relative group">
-                            <button className="text-blue-600 hover:text-blue-900" title="Download">
-                              <Download className="h-4 w-4" />
-                            </button>
-                            <div className="absolute right-0 top-6 hidden group-hover:block bg-white border border-secondary-200 rounded-lg shadow-lg z-10 w-48">
-                              <button
-                                onClick={() => handleDownloadProcessed(cert)}
-                                className="block w-full text-left px-4 py-2 text-sm text-secondary-700 hover:bg-secondary-50 rounded-t-lg"
-                              >
-                                <div className="flex items-center space-x-2">
-                                  <ImageIcon className="h-4 w-4" />
-                                  <span>Download with Markers</span>
-                                </div>
-                                <div className="text-xs text-secondary-500">Processed version with visual indicators</div>
-                              </button>
-                              <button
-                                onClick={() => handleDownloadOriginal(cert)}
-                                className="block w-full text-left px-4 py-2 text-sm text-secondary-700 hover:bg-secondary-50 rounded-b-lg"
-                              >
-                                <div className="flex items-center space-x-2">
-                                  <Download className="h-4 w-4" />
-                                  <span>Download Original</span>
-                                </div>
-                                <div className="text-xs text-secondary-500">Clean version without markers</div>
-                              </button>
-                            </div>
-                          </div>
+                          <button
+                            onClick={() => handleDownload(cert)}
+                            className="text-green-600 hover:text-green-900 p-1 rounded"
+                            title="Download"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -527,11 +557,13 @@ const AdminDatabase = () => {
                 </div>
               ) : searchTerm || statusFilter !== 'all' ? (
                 <div>
+                  <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg">No certificates match your search criteria</p>
                   <p className="text-sm">Try adjusting your filters or search terms</p>
                 </div>
               ) : (
                 <div>
+                  <RefreshCw className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg">No certificates found</p>
                   <p className="text-sm">Upload some certificates to get started</p>
                 </div>
@@ -541,82 +573,198 @@ const AdminDatabase = () => {
         )}
       </motion.div>
 
-      {/* Certificate Details Modal */}
+      {/* Certificate Details Modal - FIXED VERSION */}
       <Modal
         isOpen={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
         title={`Certificate Details - ${selectedCert?.certificate_number}`}
-        size="xl"
+        size="7xl"
       >
         {selectedCert && (
-          <div className="space-y-6">
-            {/* Basic Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h3 className="text-lg font-medium text-secondary-900 mb-3">Certificate Information</h3>
-                <div className="space-y-2 text-sm">
-                  <div><strong>Certificate Number:</strong> {selectedCert.certificate_number}</div>
-                  <div><strong>Status:</strong> {getStatusBadge(selectedCert.verification_status)}</div>
-                  <div><strong>Confidence:</strong> {selectedCert.confidence ? `${Math.round(selectedCert.confidence * 100)}%` : 'N/A'}</div>
-                  <div><strong>Created:</strong> {formatDate(selectedCert.created_at)}</div>
-                  <div><strong>Hash:</strong> <span className="font-mono text-xs break-all">{selectedCert.hash || 'N/A'}</span></div>
+          <div className="max-h-[85vh] overflow-y-auto">
+            <div className="space-y-6">
+              
+              {/* Certificate Information Section */}
+              <div className="bg-white rounded-lg border border-secondary-200">
+                <div className="px-6 py-4 border-b border-secondary-200 bg-secondary-50">
+                  <h4 className="text-xl font-semibold text-secondary-900 flex items-center">
+                    <FileText className="h-6 w-6 mr-3 text-primary-600" />
+                    Certificate Information
+                  </h4>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {selectedCert.certificate_data && Object.entries(selectedCert.certificate_data).map(([key, value]) => (
+                      value && (
+                        <div key={key} className="bg-secondary-50 rounded-lg p-4 border border-secondary-100">
+                          <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-2">
+                            {key.replace(/_/g, ' ')}
+                          </dt>
+                          <dd className="text-sm text-secondary-900 break-words font-medium">
+                            {safeRenderValue(value)}
+                          </dd>
+                        </div>
+                      )
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-lg font-medium text-secondary-900 mb-3">Student Information</h3>
-                <div className="space-y-2 text-sm">
-                  {selectedCert.certificate_data && Object.entries(selectedCert.certificate_data).map(([key, value]) => (
-                    <div key={key}>
-                      <strong>{key}:</strong> {safeRenderValue(value)}
+              {/* Student Information Section */}
+              {selectedCert.certificate_data?.['Student Name'] && (
+                <div className="bg-white rounded-lg border border-secondary-200">
+                  <div className="px-6 py-4 border-b border-secondary-200 bg-blue-50">
+                    <h4 className="text-xl font-semibold text-secondary-900 flex items-center">
+                      <User className="h-6 w-6 mr-3 text-blue-600" />
+                      Student Information
+                    </h4>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {[
+                        { label: 'Student Name', key: 'Student Name' },
+                        { label: 'Faculty', key: 'Faculty Name' },
+                        { label: 'Institution', key: 'Institution Name' },
+                        { label: 'Degree', key: 'Degree Name' },
+                        { label: 'Degree Classification', key: 'Degree Classification' },
+                        { label: 'Research Focus Area', key: 'Research Focus Area' }
+                      ].map(({ label, key }) => (
+                        selectedCert.certificate_data?.[key] && (
+                          <div key={key} className="flex flex-col space-y-1 p-4 bg-secondary-50 rounded-lg">
+                            <span className="text-sm font-medium text-secondary-600">{label}:</span>
+                            <span className="text-base text-secondary-900 font-semibold break-words">
+                              {selectedCert.certificate_data[key]}
+                            </span>
+                          </div>
+                        )
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Verification History */}
-            <div>
-              <h3 className="text-lg font-medium text-secondary-900 mb-3">Verification History</h3>
-              {loadingHistory ? (
-                <div className="flex justify-center py-4">
-                  <LoadingSpinner size="small" />
-                </div>
-              ) : certHistory.length > 0 ? (
-                <div className="space-y-3 max-h-64 overflow-y-auto">
-                  {certHistory.map((entry, index) => (
-                    <div key={index} className="border border-secondary-200 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${entry.status === 'VERIFIED' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {entry.status}
-                          </span>
-                          <span className="text-xs text-secondary-500">
-                            {entry.confidence ? `${Math.round(entry.confidence * 100)}% confidence` : ''}
-                          </span>
-                        </div>
-                        <div className="text-xs text-secondary-500">
-                          {formatDate(entry.timestamp)}
-                        </div>
-                      </div>
-                      {entry.message && (
-                        <p className="text-sm text-secondary-700 break-words">{entry.message}</p>
-                      )}
-                      <div className="text-xs text-secondary-500 space-y-1">
-                        <div>Source: <span className="font-mono">{entry.source}</span></div>
-                        <div>IP: <span className="font-mono">{entry.ip_address}</span></div>
-                        {entry.user_agent && (
-                          <div>User Agent: <span className="font-mono text-xs break-all">{entry.user_agent}</span></div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8">
-                  <p className="text-sm text-secondary-500">No verification history available</p>
+                  </div>
                 </div>
               )}
+
+              {/* Verification Status Section */}
+              <div className="bg-white rounded-lg border border-secondary-200">
+                <div className="px-6 py-4 border-b border-secondary-200 bg-green-50">
+                  <h4 className="text-xl font-semibold text-secondary-900 flex items-center">
+                    <Shield className="h-6 w-6 mr-3 text-green-600" />
+                    Verification Status
+                  </h4>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Status Badge */}
+                    <div className="flex flex-col space-y-2 p-4 bg-secondary-50 rounded-lg">
+                      <span className="text-sm font-medium text-secondary-600">Status:</span>
+                      <div className="flex items-center">
+                        {getStatusBadge(selectedCert.verification_status)}
+                      </div>
+                    </div>
+
+                    {/* Confidence Score */}
+                    <div className="flex flex-col space-y-2 p-4 bg-secondary-50 rounded-lg">
+                      <span className="text-sm font-medium text-secondary-600">Confidence:</span>
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-1 bg-secondary-200 rounded-full h-3">
+                          <div 
+                            className="bg-green-600 h-3 rounded-full transition-all duration-300" 
+                            style={{ width: `${(selectedCert.confidence || 0) * 100}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-lg font-bold text-secondary-900">
+                          {selectedCert.confidence ? `${Math.round(selectedCert.confidence * 100)}%` : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Creation Date */}
+                    <div className="flex flex-col space-y-2 p-4 bg-secondary-50 rounded-lg">
+                      <span className="text-sm font-medium text-secondary-600">Created:</span>
+                      <span className="text-base text-secondary-900 font-medium">
+                        {formatDate(selectedCert.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Technical Details Section */}
+              <div className="bg-white rounded-lg border border-secondary-200">
+                <div className="px-6 py-4 border-b border-secondary-200 bg-purple-50">
+                  <h4 className="text-xl font-semibold text-secondary-900 flex items-center">
+                    <Settings className="h-6 w-6 mr-3 text-purple-600" />
+                    Technical Details
+                  </h4>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {[
+                      { label: 'Certificate Number', value: selectedCert.certificate_number },
+                      { label: 'Hash', value: selectedCert.hash, mono: true },
+                      { label: 'Processing Time', value: selectedCert.processing_time ? `${selectedCert.processing_time}s` : null },
+                      { label: 'Extraction Quality', value: selectedCert.extraction_quality },
+                      { label: 'Version', value: selectedCert.version },
+                      { label: 'Source Image', value: selectedCert.source_image }
+                    ].map(({ label, value, mono }) => (
+                      value && (
+                        <div key={label} className="flex flex-col space-y-2 p-4 bg-secondary-50 rounded-lg border border-secondary-100">
+                          <div className="text-sm font-medium text-secondary-600">
+                            {label}
+                          </div>
+                          <div className={`text-sm text-secondary-900 break-all ${mono ? 'font-mono text-xs bg-gray-100 p-2 rounded' : 'font-medium'}`}>
+                            {value}
+                          </div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons Section - REMOVED */}
+              {/* This section has been removed as requested */}
+
+            {/* Verification History Section - Full Width */}
+            {selectedCert.verification_history && selectedCert.verification_history.length > 0 && (
+              <div className="bg-white rounded-lg border border-secondary-200">
+                <div className="px-6 py-4 border-b border-secondary-200 bg-orange-50">
+                  <h4 className="text-xl font-semibold text-secondary-900 flex items-center">
+                    <History className="h-6 w-6 mr-3 text-orange-600" />
+                    Recent Verification History
+                  </h4>
+                </div>
+                <div className="p-6">
+                  <div className="space-y-4 max-h-80 overflow-y-auto">
+                    {selectedCert.verification_history.slice(0, 5).map((entry, index) => (
+                      <div key={index} className="border border-secondary-200 rounded-lg p-4 bg-secondary-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3 mb-2">
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                entry.status === 'VERIFIED' ? 'bg-green-100 text-green-800' :
+                                entry.status === 'VERIFIED_BY_DATA' ? 'bg-blue-100 text-blue-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {entry.status}
+                              </span>
+                              <span className="text-sm text-secondary-500">
+                                {entry.confidence ? `${Math.round(entry.confidence * 100)}% confidence` : ''}
+                              </span>
+                            </div>
+                            <div className="text-sm text-secondary-500 mb-2">
+                              {formatDate(entry.timestamp)}
+                            </div>
+                            {entry.message && (
+                              <p className="text-base text-secondary-700 break-words">{entry.message}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             </div>
           </div>
         )}
@@ -632,10 +780,10 @@ const AdminDatabase = () => {
         <div className="space-y-6">
           {/* Date Range */}
           <div>
-            <label className="form-label">Date Range</label>
+            <h4 className="text-lg font-medium text-secondary-900 mb-3">Date Range</h4>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm text-secondary-600">From</label>
+                <label className="form-label">Start Date</label>
                 <input
                   type="date"
                   value={dateRange.start}
@@ -644,7 +792,7 @@ const AdminDatabase = () => {
                 />
               </div>
               <div>
-                <label className="text-sm text-secondary-600">To</label>
+                <label className="form-label">End Date</label>
                 <input
                   type="date"
                   value={dateRange.end}
@@ -657,29 +805,29 @@ const AdminDatabase = () => {
 
           {/* Confidence Range */}
           <div>
-            <label className="form-label">Confidence Range ({confidenceRange.min}% - {confidenceRange.max}%)</label>
+            <h4 className="text-lg font-medium text-secondary-900 mb-3">Confidence Range</h4>
             <div className="grid grid-cols-2 gap-4">
               <div>
+                <label className="form-label">Minimum (%)</label>
                 <input
-                  type="range"
+                  type="number"
                   min="0"
                   max="100"
                   value={confidenceRange.min}
-                  onChange={(e) => setConfidenceRange(prev => ({ ...prev, min: parseInt(e.target.value) }))}
-                  className="w-full"
+                  onChange={(e) => setConfidenceRange(prev => ({ ...prev, min: parseInt(e.target.value) || 0 }))}
+                  className="form-input"
                 />
-                <div className="text-sm text-secondary-600 text-center">Min: {confidenceRange.min}%</div>
               </div>
               <div>
+                <label className="form-label">Maximum (%)</label>
                 <input
-                  type="range"
+                  type="number"
                   min="0"
                   max="100"
                   value={confidenceRange.max}
-                  onChange={(e) => setConfidenceRange(prev => ({ ...prev, max: parseInt(e.target.value) }))}
-                  className="w-full"
+                  onChange={(e) => setConfidenceRange(prev => ({ ...prev, max: parseInt(e.target.value) || 100 }))}
+                  className="form-input"
                 />
-                <div className="text-sm text-secondary-600 text-center">Max: {confidenceRange.max}%</div>
               </div>
             </div>
           </div>
@@ -690,18 +838,38 @@ const AdminDatabase = () => {
             <select
               value={facultyFilter}
               onChange={(e) => setFacultyFilter(e.target.value)}
-              className="form-select"
+              className="form-input"
             >
               <option value="all">All Faculties</option>
-              <option value="Faculty of Computing and Information Technology">Computing and IT</option>
-              <option value="Faculty of Health Sciences and Medical Research">Health Sciences</option>
-              <option value="Faculty of Engineering">Engineering</option>
-              <option value="Faculty of Business">Business</option>
+              {getUniqueFaculties().map(faculty => (
+                <option key={faculty} value={faculty}>{faculty}</option>
+              ))}
+              {/* Fallback options in case no faculties are found */}
+              {getUniqueFaculties().length === 0 && (
+                <>
+                  <option value="Faculty of Computing and Information Technology">Computing and IT</option>
+                  <option value="Faculty of Health Sciences and Medical Research">Health Sciences</option>
+                  <option value="Faculty of Engineering">Engineering</option>
+                  <option value="Faculty of Business">Business</option>
+                </>
+              )}
             </select>
           </div>
 
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3">
+            <button
+              onClick={() => {
+                // Reset filters to default
+                setDateRange({ start: '', end: '' });
+                setConfidenceRange({ min: 0, max: 100 });
+                setFacultyFilter('all');
+                setShowFilterModal(false);
+              }}
+              className="btn-secondary"
+            >
+              Reset
+            </button>
             <button
               onClick={() => setShowFilterModal(false)}
               className="btn-secondary"
@@ -720,6 +888,9 @@ const AdminDatabase = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Delete Confirmation Modal - REMOVED */}
+      {/* Delete functionality has been removed as requested */}
     </div>
   );
 };

@@ -154,10 +154,10 @@ const AdminDashboard = () => {
       {/* Header with Actions */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-black">
             Admin Dashboard
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
+          <p className="text-gray-600 dark:text-black mt-1">
             Certificate verification system with immutable ledger
           </p>
         </div>

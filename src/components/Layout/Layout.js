@@ -4,7 +4,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Menu, 
   X, 
-  Shield, 
   Upload, 
   Database, 
   CheckCircle, 
@@ -12,6 +11,39 @@ import {
   LogOut,
   Home
 } from 'lucide-react';
+
+// CertVerify Logo Component
+const CertVerifyLogo = ({ size = 40 }) => {
+  return (
+    <div 
+      className="bg-primary-600 rounded-lg flex items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      <svg 
+        width={size * 0.6} 
+        height={size * 0.6} 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        {/* Shield shape */}
+        <path
+          d="M12 2L3 7V12C3 17.55 6.84 22.74 12 23C17.16 22.74 21 17.55 21 12V7L12 2Z"
+          fill="white"
+          fillOpacity="0.9"
+        />
+        {/* Checkmark */}
+        <path
+          d="M9 12L11 14L15 10"
+          stroke="#2563EB"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+};
 
 const Layout = ({ children }) => {
   const { user, logout } = useAuth();
@@ -61,12 +93,10 @@ const Layout = ({ children }) => {
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         lg:translate-x-0 lg:static lg:inset-0
       `}>
-        {/* Sidebar Header */}
+        {/* Sidebar Header with New Logo */}
         <div className="flex items-center justify-between h-16 px-6 border-b border-secondary-200 bg-white flex-shrink-0">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
-              <Shield className="h-6 w-6 text-white" />
-            </div>
+            <CertVerifyLogo size={40} />
             <span className="text-xl font-bold text-secondary-900">CertVerify</span>
           </div>
           <button

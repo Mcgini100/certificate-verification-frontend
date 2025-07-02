@@ -1,6 +1,7 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "CertVerify",
+  "name": "CertVerify - Secure Certificate Verification",
+  "description": "Certificate verification system with immutable blockchain ledger",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +21,7 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#2563EB",
+  "background_color": "#ffffff",
+  "categories": ["education", "security", "verification"]
 }
