@@ -1,46 +1,42 @@
-import React, { useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  CheckCircle, 
-  AlertCircle, 
-  Upload, 
-  FileText, 
-  Shield, 
-  Hash, 
-  Eye, 
-  Download,
-  Clock,
-  Info,
-  ExternalLink,
-  Copy,
-  RefreshCw,
-  Zap,
-  Archive,
-  Star,
-  Search
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { CheckCircle, AlertCircle, Upload, Download, Eye, Clock, Shield, X, FileText } from 'lucide-react';
 import { toast } from 'react-toastify';
 import FileUpload from '../../components/common/FileUpload';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import Modal from '../../components/common/Modal';
-import { verifyCertificate, extractHash } from '../../services/api';
+import { verifyCertificate, getUserVerifications } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const UserVerify = () => {
+  const { user } = useAuth();
   const [files, setFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
   const [verificationHistory, setVerificationHistory] = useState([]);
-  const [processingStage, setProcessingStage] = useState('');
-  const fileInputRef = useRef(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Load verification history from localStorage on component mount
-  React.useEffect(() => {
-    const history = JSON.parse(localStorage.getItem('userVerificationHistory') || '[]');
-    setVerificationHistory(history);
-  }, []);
+  // ✅ ENHANCED: Function to check if verification is successful
+  const isVerificationSuccessful = (result) => {
+    return (
+      result.certificate_exists_in_ledger ||  // ✅ Key addition: existing certificates are successful
+      result.verification_status === 'VERIFIED' || 
+      result.verification_status === 'VERIFIED_BY_DATA'
+    );
+  };
+
+  // ✅ ENHANCED: Get appropriate success message
+  const getSuccessMessage = (result) => {
+    if (result.certificate_exists_in_ledger) {
+      return '✅ Certificate verified! Found in secure ledger';
+    }
+    if (result.verification_status === 'VERIFIED_BY_DATA') {
+      return '✅ Certificate verified through data matching';
+    }
+    return '✅ Certificate verified successfully!';
+  };
 
   const handleFilesSelect = (selectedFiles) => {
     setFiles(selectedFiles);
@@ -54,24 +50,8 @@ const UserVerify = () => {
     }
 
     setProcessing(true);
-    setProcessingStage('Uploading file...');
-    
     try {
       const file = files[0].file;
-      
-      // Simulate processing stages for better UX
-      setProcessingStage('Analyzing certificate...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setProcessingStage('Extracting embedded hash...');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      setProcessingStage('Performing OCR extraction...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setProcessingStage('Verifying against database...');
-      await new Promise(resolve => setTimeout(resolve, 800));
-
       const options = {
         use_enhanced_extraction: true,
         check_database: true
@@ -79,40 +59,28 @@ const UserVerify = () => {
 
       const verificationResult = await verifyCertificate(file, options);
       
-      const processedResult = {
-        id: Date.now(),
+      // ✅ ENHANCED: Create complete result object with all necessary data
+      const completeResult = {
         filename: file.name,
-        fileSize: file.size,
-        fileType: file.type,
         ...verificationResult,
-        processed_at: new Date().toISOString(),
-        processing_time: Date.now() - Date.now() // In real app, measure actual time
+        processed_at: new Date().toISOString()
       };
 
-      setResult(processedResult);
+      setResult(completeResult);
 
-      // Save to verification history
-      const updatedHistory = [processedResult, ...verificationHistory.slice(0, 19)]; // Keep last 20
-      setVerificationHistory(updatedHistory);
-      localStorage.setItem('userVerificationHistory', JSON.stringify(updatedHistory));
-
-      // Show success/warning based on result
-      if (verificationResult.verification_status === 'VERIFIED') {
-        toast.success('Certificate successfully verified! ✅');
-      } else if (verificationResult.verification_status === 'VERIFIED_BY_DATA') {
-        toast.success('Certificate verified by data matching! 📊');
-      } else if (verificationResult.verification_status === 'CORRUPTED_HASH') {
-        toast.warning('Hash appears corrupted, but certificate data may be valid 🔶');
+      // ✅ ENHANCED: Show appropriate success/failure toast
+      if (isVerificationSuccessful(completeResult)) {
+        toast.success(getSuccessMessage(completeResult));
       } else {
-        toast.error('Certificate verification failed ❌');
+        toast.warning('Certificate verification failed or incomplete');
       }
-      
+
+      // Save to localStorage as fallback
+      saveVerificationLocally(completeResult);
+
     } catch (error) {
       const errorResult = {
-        id: Date.now(),
         filename: files[0].file.name,
-        fileSize: files[0].file.size,
-        fileType: files[0].file.type,
         verification_status: 'ERROR',
         message: error.message,
         confidence: 0,
@@ -121,32 +89,88 @@ const UserVerify = () => {
       
       setResult(errorResult);
       toast.error('Verification failed: ' + error.message);
+      saveVerificationLocally(errorResult);
     } finally {
       setProcessing(false);
-      setProcessingStage('');
     }
   };
 
-  const clearResult = () => {
-    setResult(null);
+  const saveVerificationLocally = (verification) => {
+    const savedVerifications = localStorage.getItem(`user_verifications_${user?.id}`);
+    let verifications = [];
+    
+    if (savedVerifications) {
+      try {
+        verifications = JSON.parse(savedVerifications);
+      } catch (error) {
+        console.error('Error parsing saved verifications:', error);
+      }
+    }
+    
+    verifications.unshift(verification);
+    verifications = verifications.slice(0, 10);
+    
+    localStorage.setItem(`user_verifications_${user?.id}`, JSON.stringify(verifications));
+  };
+
+  const loadVerificationHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const history = await getUserVerifications(user?.id, { limit: 20 });
+      setVerificationHistory(Array.isArray(history) ? history : history.verifications || []);
+    } catch (error) {
+      console.error('Failed to load verification history:', error);
+      
+      // Fallback to localStorage
+      const savedVerifications = localStorage.getItem(`user_verifications_${user?.id}`);
+      if (savedVerifications) {
+        try {
+          setVerificationHistory(JSON.parse(savedVerifications));
+        } catch (parseError) {
+          console.error('Error parsing saved verifications:', parseError);
+          setVerificationHistory([]);
+        }
+      }
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const clearFiles = () => {
     setFiles([]);
+    setResult(null);
   };
 
   const viewDetails = () => {
     setShowDetailsModal(true);
   };
 
-  const viewHistory = () => {
-    setShowHistoryModal(true);
-  };
+  const shareResult = () => {
+    if (!result) return;
+    
+    const shareText = `Certificate Verification Result:
+    
+Filename: ${result.filename}
+Status: ${result.verification_status?.replace('_', ' ') || 'Unknown'}
+Confidence: ${(result.confidence * 100).toFixed(1)}%
+Verified: ${new Date(result.processed_at).toLocaleDateString()}
 
-  const showHelp = () => {
-    setShowHelpModal(true);
-  };
+${result.certificate_exists_in_ledger ? 
+  '✅ Certificate found in secure ledger' : 
+  result.message || 'Verification completed'
+}
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard! 📋');
+Generated by CertVerify`;
+
+    if (navigator.share) {
+      navigator.share({
+        title: 'Certificate Verification Result',
+        text: shareText
+      });
+    } else {
+      navigator.clipboard.writeText(shareText);
+      toast.success('Result copied to clipboard! 📋');
+    }
   };
 
   const downloadReport = () => {
@@ -158,7 +182,8 @@ const UserVerify = () => {
         verification_status: result.verification_status,
         confidence: result.confidence,
         processed_at: result.processed_at,
-        message: result.message
+        message: result.message,
+        certificate_exists_in_ledger: result.certificate_exists_in_ledger || false
       }
     };
     
@@ -172,7 +197,13 @@ const UserVerify = () => {
     toast.success('Report downloaded! 📄');
   };
 
-  const getStatusColor = (status) => {
+  // ✅ ENHANCED: Better status color handling
+  const getStatusColor = (status, certificateExists = false) => {
+    // If certificate exists in ledger, always show as success
+    if (certificateExists) {
+      return 'bg-green-100 text-green-800 border border-green-200';
+    }
+    
     switch (status) {
       case 'VERIFIED':
         return 'bg-green-100 text-green-800 border border-green-200';
@@ -191,12 +222,18 @@ const UserVerify = () => {
     }
   };
 
-  const getStatusDescription = (status) => {
+  // ✅ ENHANCED: Better status descriptions
+  const getStatusDescription = (status, certificateExists = false) => {
+    // If certificate exists in ledger, show positive message
+    if (certificateExists) {
+      return 'This certificate has been verified and exists in our secure ledger. It is authentic and trusted.';
+    }
+    
     switch (status) {
       case 'VERIFIED':
         return 'The certificate has been successfully verified with a valid embedded hash that matches our database records.';
       case 'VERIFIED_BY_DATA':
-        return 'The certificate data matches our database records, though the hash verification had issues. The certificate appears to be authentic.';
+        return 'The certificate data matches our database records. The certificate appears to be authentic.';
       case 'FAILED':
         return 'The certificate could not be verified against our database. It may be invalid, tampered with, or from an unrecognized institution.';
       case 'CORRUPTED_HASH':
@@ -211,19 +248,40 @@ const UserVerify = () => {
   };
 
   const getConfidenceLevel = (confidence) => {
-    if (confidence >= 0.9) return { level: 'Very High', color: 'text-green-600', bg: 'bg-green-500' };
-    if (confidence >= 0.8) return { level: 'High', color: 'text-green-600', bg: 'bg-green-500' };
-    if (confidence >= 0.7) return { level: 'Good', color: 'text-yellow-600', bg: 'bg-yellow-500' };
-    if (confidence >= 0.5) return { level: 'Moderate', color: 'text-orange-600', bg: 'bg-orange-500' };
-    return { level: 'Low', color: 'text-red-600', bg: 'bg-red-500' };
+    if (confidence >= 0.9) return { level: 'Excellent', color: 'text-green-600', bg: 'bg-green-500' };
+    if (confidence >= 0.8) return { level: 'Very Good', color: 'text-green-600', bg: 'bg-green-400' };
+    if (confidence >= 0.7) return { level: 'Good', color: 'text-blue-600', bg: 'bg-blue-400' };
+    if (confidence >= 0.5) return { level: 'Fair', color: 'text-yellow-600', bg: 'bg-yellow-400' };
+    return { level: 'Poor', color: 'text-red-600', bg: 'bg-red-400' };
   };
 
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // ✅ ENHANCED: Better status badge for history
+  const getStatusBadge = (verification) => {
+    const isSuccess = isVerificationSuccessful(verification);
+    const statusClasses = isSuccess
+      ? 'bg-green-100 text-green-800'
+      : 'bg-red-100 text-red-800';
+    
+    const displayStatus = verification.certificate_exists_in_ledger 
+      ? 'VERIFIED (Ledger)'
+      : verification.verification_status?.replace('_', ' ') || 'Unknown';
+    
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClasses}`}>
+        {displayStatus}
+      </span>
+    );
   };
 
   return (
@@ -235,239 +293,237 @@ const UserVerify = () => {
         transition={{ duration: 0.6 }}
         className="mb-8"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-secondary-900 mb-2">
               Verify Certificate
             </h1>
             <p className="text-secondary-600">
-              Upload your certificate to verify its authenticity and extract information
+              Upload your certificate to verify its authenticity instantly
             </p>
           </div>
-          <div className="flex space-x-3">
-            <button
-              onClick={viewHistory}
-              className="px-4 py-2 bg-secondary-100 hover:bg-secondary-200 text-secondary-700 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-            >
-              <Archive className="h-4 w-4" />
-              <span>History</span>
-            </button>
-            <button
-              onClick={showHelp}
-              className="px-4 py-2 bg-primary-100 hover:bg-primary-200 text-primary-700 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-            >
-              <Info className="h-4 w-4" />
-              <span>Help</span>
-            </button>
-          </div>
+          <motion.button
+            onClick={() => {
+              loadVerificationHistory();
+              setShowHistoryModal(true);
+            }}
+            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-secondary-300 rounded-lg text-sm font-medium text-secondary-700 bg-white hover:bg-secondary-50 transition-colors"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Clock className="h-4 w-4 mr-2" />
+            View History
+          </motion.button>
         </div>
       </motion.div>
 
-      {/* Main Content */}
-      <div className={`grid gap-8 ${result ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-1 max-w-2xl mx-auto'}`}>
-        {/* Left Column - Upload */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-        >
-          <div className="bg-white rounded-xl shadow-lg border border-secondary-200">
-            <div className="p-6">
-              <div className="flex items-center space-x-3 mb-6">
-                <div className="p-2 bg-primary-100 rounded-lg">
-                  <Upload className="h-6 w-6 text-primary-600" />
+      {/* Upload Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.1 }}
+        className="card mb-6"
+      >
+        <h2 className="text-xl font-semibold text-secondary-900 mb-4">
+          Upload Certificate
+        </h2>
+        
+        <FileUpload
+          onFilesSelect={handleFilesSelect}
+          acceptedTypes={['image/*', '.pdf']}
+          maxFiles={1}
+          className="mb-4"
+        />
+        
+        {files.length > 0 && (
+          <div className="mt-4 p-4 bg-secondary-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-secondary-200 rounded">
+                  <Upload className="h-4 w-4 text-secondary-600" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold text-secondary-900">Upload Certificate</h2>
-                  <p className="text-sm text-secondary-600">Select your certificate file for verification</p>
+                  <p className="text-sm font-medium text-secondary-900">
+                    {files[0].file.name}
+                  </p>
+                  <p className="text-xs text-secondary-600">
+                    {(files[0].file.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
                 </div>
               </div>
+              <button
+                onClick={clearFiles}
+                className="p-1 text-secondary-400 hover:text-secondary-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
-              <FileUpload
-                onFilesSelect={handleFilesSelect}
-                maxFiles={1}
-                acceptedFileTypes={['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']}
-                maxFileSize={10 * 1024 * 1024} // 10MB
-              />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 pt-4 border-t border-secondary-200">
+          <div className="mb-4 sm:mb-0">
+            <p className="text-sm text-secondary-600">
+              Supported formats: PNG, JPG, JPEG, PDF (max 10MB)
+            </p>
+          </div>
+          <motion.button
+            onClick={handleVerification}
+            disabled={files.length === 0 || processing}
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            whileHover={files.length > 0 && !processing ? { scale: 1.02 } : {}}
+            whileTap={files.length > 0 && !processing ? { scale: 0.98 } : {}}
+          >
+            {processing ? (
+              <>
+                <LoadingSpinner size="small" className="mr-2" />
+                Verifying...
+              </>
+            ) : (
+              <>
+                <Shield className="h-4 w-4 mr-2" />
+                Verify Certificate
+              </>
+            )}
+          </motion.button>
+        </div>
+      </motion.div>
 
-              {files.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  transition={{ duration: 0.3 }}
-                  className="mt-4 p-4 bg-secondary-50 rounded-lg border border-secondary-200"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <FileText className="h-5 w-5 text-secondary-600" />
-                      <div>
-                        <p className="text-sm font-medium text-secondary-900">{files[0].file.name}</p>
-                        <p className="text-xs text-secondary-600">
-                          {formatFileSize(files[0].file.size)} • {files[0].file.type}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setFiles([])}
-                      className="text-secondary-400 hover:text-secondary-600 transition-colors"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </motion.div>
+      {/* Results Section */}
+      {result && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="card"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+            <h2 className="text-xl font-semibold text-secondary-900 mb-2 sm:mb-0">
+              Verification Result
+            </h2>
+            <div className="flex items-center space-x-2">
+              <motion.button
+                onClick={shareResult}
+                className="btn-secondary text-sm"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                Share
+              </motion.button>
+              <motion.button
+                onClick={downloadReport}
+                className="btn-secondary text-sm flex items-center"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Report
+              </motion.button>
+              <motion.button
+                onClick={viewDetails}
+                className="btn-primary text-sm flex items-center"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Eye className="h-4 w-4 mr-1" />
+                Details
+              </motion.button>
+            </div>
+          </div>
+
+          {/* ✅ ENHANCED: Main result display with better logic */}
+          <div className={`p-6 rounded-lg border-2 ${
+            isVerificationSuccessful(result) 
+              ? 'bg-green-50 border-green-200' 
+              : 'bg-red-50 border-red-200'
+          }`}>
+            <div className="flex items-start space-x-4">
+              {isVerificationSuccessful(result) ? (
+                <CheckCircle className="h-8 w-8 text-green-600 mt-1 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="h-8 w-8 text-red-600 mt-1 flex-shrink-0" />
               )}
+              <div className="flex-1">
+                <h3 className={`text-lg font-semibold mb-2 ${
+                  isVerificationSuccessful(result) ? 'text-green-900' : 'text-red-900'
+                }`}>
+                  {isVerificationSuccessful(result) ? 'Certificate Verified' : 'Verification Failed'}
+                </h3>
+                <p className={`text-sm mb-4 ${
+                  isVerificationSuccessful(result) ? 'text-green-700' : 'text-red-700'
+                }`}>
+                  {result.certificate_exists_in_ledger 
+                    ? '✅ Certificate found in secure ledger and verified as authentic'
+                    : result.message || getStatusDescription(result.verification_status)
+                  }
+                </p>
+                
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 bg-white rounded-lg">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <Shield className="h-4 w-4 text-primary-600" />
+                      <span className="text-sm font-medium text-primary-900">Status</span>
+                    </div>
+                    <div className="text-sm font-medium text-primary-900">
+                      {result.certificate_exists_in_ledger 
+                        ? 'VERIFIED (Ledger)' 
+                        : result.verification_status?.replace('_', ' ') || 'Unknown'
+                      }
+                    </div>
+                  </div>
+                  <div className="p-4 bg-secondary-50 rounded-lg">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <CheckCircle className="h-4 w-4 text-secondary-600" />
+                      <span className="text-sm font-medium text-primary-900">Confidence</span>
+                    </div>
+                    <div className="text-2xl font-bold text-primary-900">
+                      {(result.confidence * 100).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-primary-700">
+                      {getConfidenceLevel(result.confidence).level}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-secondary-50 rounded-lg">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <Clock className="h-4 w-4 text-secondary-600" />
+                      <span className="text-sm font-medium text-secondary-900">Processed</span>
+                    </div>
+                    <div className="text-sm font-medium text-secondary-900">
+                      {new Date(result.processed_at).toLocaleDateString()}
+                    </div>
+                    <div className="text-xs text-secondary-600">
+                      {new Date(result.processed_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                </div>
 
-              {/* Action Buttons */}
-              <div className="mt-6">
-                <button
-                  onClick={handleVerification}
-                  disabled={files.length === 0 || processing}
-                  className="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-secondary-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
-                >
-                  {processing ? (
-                    <>
-                      <LoadingSpinner size="sm" />
-                      <span>{processingStage}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Shield className="h-5 w-5" />
-                      <span>Verify Certificate</span>
-                    </>
-                  )}
-                </button>
+                {/* Certificate Verified Message */}
+                {(result.certificate_data && Object.keys(result.certificate_data).length > 0) && (
+                  <div className="mt-4">
+                    <h4 className="text-lg font-semibold text-secondary-900 mb-3">
+                      Certificate Verified
+                    </h4>
+                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                        <span className="text-sm font-medium text-green-900">
+                          Certificate information extracted successfully
+                        </span>
+                      </div>
+                      <p className="text-sm text-green-700">
+                        Use "View Details" to see complete verification information.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </motion.div>
+      )}
 
-        {/* Right Column - Results (Only show when result exists) */}
-        {result && (
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-          >
-            <div className="bg-white rounded-xl shadow-lg border border-secondary-200">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <CheckCircle className="h-6 w-6 text-green-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-semibold text-secondary-900">Verification Results</h2>
-                      <p className="text-sm text-secondary-600">Certificate authentication details</p>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={viewDetails}
-                      className="p-2 text-secondary-600 hover:text-secondary-800 hover:bg-secondary-100 rounded-lg transition-colors"
-                      title="View details"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={downloadReport}
-                      className="p-2 text-secondary-600 hover:text-secondary-800 hover:bg-secondary-100 rounded-lg transition-colors"
-                      title="Download report"
-                    >
-                      <Download className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={clearResult}
-                      className="p-2 text-secondary-600 hover:text-secondary-800 hover:bg-secondary-100 rounded-lg transition-colors"
-                      title="Clear results"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.4 }}
-                  className="space-y-6"
-                >
-                  {/* Status Overview */}
-                  <div className="text-center p-6 bg-secondary-50 rounded-lg">
-                    <div className="flex items-center justify-center mb-4">
-                      {result.verification_status === 'VERIFIED' ? (
-                        <CheckCircle className="h-12 w-12 text-green-600" />
-                      ) : result.verification_status === 'VERIFIED_BY_DATA' ? (
-                        <CheckCircle className="h-12 w-12 text-blue-600" />
-                      ) : (
-                        <AlertCircle className="h-12 w-12 text-red-600" />
-                      )}
-                    </div>
-                    <h3 className="text-xl font-semibold text-secondary-900 mb-2">
-                      {result.verification_status?.replace('_', ' ')}
-                    </h3>
-                    <p className="text-secondary-600 text-sm mb-4">
-                      {result.message}
-                    </p>
-                    <div className={`inline-flex px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(result.verification_status)}`}>
-                      {result.verification_status?.replace('_', ' ')}
-                    </div>
-                  </div>
-
-                  {/* Quick Stats */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-primary-50 rounded-lg">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <Star className="h-4 w-4 text-primary-600" />
-                        <span className="text-sm font-medium text-primary-900">Confidence</span>
-                      </div>
-                      <div className="text-2xl font-bold text-primary-900">
-                        {(result.confidence * 100).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-primary-700">
-                        {getConfidenceLevel(result.confidence).level}
-                      </div>
-                    </div>
-                    <div className="p-4 bg-secondary-50 rounded-lg">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <Clock className="h-4 w-4 text-secondary-600" />
-                        <span className="text-sm font-medium text-secondary-900">Processed</span>
-                      </div>
-                      <div className="text-sm font-medium text-secondary-900">
-                        {new Date(result.processed_at).toLocaleDateString()}
-                      </div>
-                      <div className="text-xs text-secondary-600">
-                        {new Date(result.processed_at).toLocaleTimeString()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Certificate Verified Message */}
-                  {result.certificate_data && Object.keys(result.certificate_data).length > 0 && (
-                    <div>
-                      <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-                        Certificate Verified
-                      </h4>
-                      <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                          <span className="text-sm font-medium text-green-900">
-                            Certificate information extracted successfully
-                          </span>
-                        </div>
-                        <p className="text-sm text-green-700">
-                          Use "View Details" to see complete verification information.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Detailed Results Modal */}
+      {/* Details Modal */}
       <Modal
         isOpen={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
@@ -476,62 +532,26 @@ const UserVerify = () => {
       >
         {result && (
           <div className="space-y-6">
-            {/* File Information */}
+            {/* Summary */}
             <div>
               <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-                File Information
-              </h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-secondary-50 rounded-lg">
-                  <label className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
-                    Filename
-                  </label>
-                  <p className="text-sm font-medium text-secondary-900 mt-1">
-                    {result.filename}
-                  </p>
-                </div>
-                <div className="p-3 bg-secondary-50 rounded-lg">
-                  <label className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
-                    File Size
-                  </label>
-                  <p className="text-sm font-medium text-secondary-900 mt-1">
-                    {result.fileSize ? formatFileSize(result.fileSize) : 'Unknown'}
-                  </p>
-                </div>
-                <div className="p-3 bg-secondary-50 rounded-lg">
-                  <label className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
-                    File Type
-                  </label>
-                  <p className="text-sm font-medium text-secondary-900 mt-1">
-                    {result.fileType || 'Unknown'}
-                  </p>
-                </div>
-                <div className="p-3 bg-secondary-50 rounded-lg">
-                  <label className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
-                    Processed At
-                  </label>
-                  <p className="text-sm font-medium text-secondary-900 mt-1">
-                    {new Date(result.processed_at).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Verification Details */}
-            <div>
-              <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-                Verification Details
+                Summary
               </h4>
               <div className="space-y-3">
                 <div className="p-4 border border-secondary-200 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-medium text-secondary-900">Status</span>
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(result.verification_status)}`}>
-                      {result.verification_status?.replace('_', ' ')}
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      getStatusColor(result.verification_status, result.certificate_exists_in_ledger)
+                    }`}>
+                      {result.certificate_exists_in_ledger 
+                        ? 'VERIFIED (Ledger)' 
+                        : result.verification_status?.replace('_', ' ')
+                      }
                     </span>
                   </div>
                   <p className="text-sm text-secondary-600">
-                    {getStatusDescription(result.verification_status)}
+                    {getStatusDescription(result.verification_status, result.certificate_exists_in_ledger)}
                   </p>
                 </div>
                 
@@ -570,177 +590,50 @@ const UserVerify = () => {
         size="lg"
       >
         <div className="space-y-4">
-          {verificationHistory.length === 0 ? (
+          {loadingHistory ? (
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner size="medium" />
+            </div>
+          ) : verificationHistory.length === 0 ? (
             <div className="text-center py-8">
-              <Archive className="h-12 w-12 text-secondary-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-secondary-900 mb-2">No History Yet</h3>
-              <p className="text-secondary-600">Your verification history will appear here</p>
+              <Clock className="h-12 w-12 text-secondary-300 mx-auto mb-4" />
+              <p className="text-secondary-600">No verification history yet</p>
+              <p className="text-sm text-secondary-500 mt-1">
+                Your verification attempts will appear here
+              </p>
             </div>
           ) : (
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {verificationHistory.map((item) => (
-                <div key={item.id} className="p-4 border border-secondary-200 rounded-lg hover:bg-secondary-50 transition-colors">
+            <div className="space-y-3">
+              {verificationHistory.map((verification, index) => (
+                <div key={index} className="p-4 border border-secondary-200 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-3">
-                      <FileText className="h-5 w-5 text-secondary-600" />
+                      <div className="p-2 bg-secondary-100 rounded">
+                        <FileText className="h-4 w-4 text-secondary-600" />
+                      </div>
                       <div>
-                        <p className="text-sm font-medium text-secondary-900">{item.filename}</p>
+                        <p className="text-sm font-medium text-secondary-900">
+                          {verification.filename || 'Unknown file'}
+                        </p>
                         <p className="text-xs text-secondary-600">
-                          {new Date(item.processed_at).toLocaleString()}
+                          {formatDate(verification.processed_at)}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(item.verification_status)}`}>
-                        {item.verification_status?.replace('_', ' ')}
-                      </span>
-                      <span className="text-xs text-secondary-600">
-                        {(item.confidence * 100).toFixed(1)}%
-                      </span>
-                    </div>
+                    {getStatusBadge(verification)}
                   </div>
-                  {item.message && (
-                    <p className="text-xs text-secondary-600 truncate">{item.message}</p>
+                  {(verification.message || verification.certificate_exists_in_ledger) && (
+                    <p className="text-sm text-secondary-600 mt-2">
+                      {verification.certificate_exists_in_ledger 
+                        ? '✅ Found in secure ledger'
+                        : verification.message
+                      }
+                    </p>
                   )}
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </Modal>
-
-      {/* Help Modal */}
-      <Modal
-        isOpen={showHelpModal}
-        onClose={() => setShowHelpModal(false)}
-        title="How to Verify Certificates"
-        size="lg"
-      >
-        <div className="space-y-6">
-          {/* Quick Start Guide */}
-          <div>
-            <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-              Quick Start Guide
-            </h4>
-            <div className="space-y-3">
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <h5 className="font-medium text-blue-900 mb-1">1. Upload Your Certificate</h5>
-                <p className="text-sm text-blue-800">
-                  Click "Choose File" or drag and drop your certificate image (JPG, PNG) or PDF file.
-                </p>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <h5 className="font-medium text-blue-900 mb-1">2. Start Verification</h5>
-                <p className="text-sm text-blue-800">
-                  Click "Verify Certificate" to analyze your document for authenticity.
-                </p>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <h5 className="font-medium text-blue-900 mb-1">3. Review Results</h5>
-                <p className="text-sm text-blue-800">
-                  Get instant verification results with confidence scores and detailed information.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Understanding Results */}
-          <div>
-            <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-              Understanding Verification Results
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center space-x-3 p-2 rounded">
-                <CheckCircle className="h-5 w-5 text-green-600" />
-                <div>
-                  <span className="font-medium text-green-800">Verified</span>
-                  <p className="text-sm text-secondary-600">Certificate is authentic with valid hash</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3 p-2 rounded">
-                <CheckCircle className="h-5 w-5 text-blue-600" />
-                <div>
-                  <span className="font-medium text-blue-800">Verified by Data</span>
-                  <p className="text-sm text-secondary-600">Data matches but hash may be corrupted</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3 p-2 rounded">
-                <AlertCircle className="h-5 w-5 text-orange-600" />
-                <div>
-                  <span className="font-medium text-orange-800">Hash Corrupted</span>
-                  <p className="text-sm text-secondary-600">Try uploading a higher quality image</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3 p-2 rounded">
-                <AlertCircle className="h-5 w-5 text-yellow-600" />
-                <div>
-                  <span className="font-medium text-yellow-800">No Hash</span>
-                  <p className="text-sm text-secondary-600">Older certificate without embedded hash</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3 p-2 rounded">
-                <AlertCircle className="h-5 w-5 text-red-600" />
-                <div>
-                  <span className="font-medium text-red-800">Failed</span>
-                  <p className="text-sm text-secondary-600">Certificate could not be verified</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Tips for Best Results */}
-          <div>
-            <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-              Tips for Best Results
-            </h4>
-            <div className="space-y-2 text-sm text-secondary-700">
-              <div className="flex items-start space-x-2">
-                <span className="text-primary-600 mt-1">•</span>
-                <span>Use high-resolution images (at least 300 DPI) for better OCR accuracy</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="text-primary-600 mt-1">•</span>
-                <span>Ensure the certificate is well-lit and all text is clearly visible</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="text-primary-600 mt-1">•</span>
-                <span>Avoid blurry, rotated, or heavily compressed images</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="text-primary-600 mt-1">•</span>
-                <span>PDF files are preferred over images when available</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="text-primary-600 mt-1">•</span>
-                <span>Contact support if you consistently get unexpected results</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Supported Formats */}
-          <div>
-            <h4 className="text-lg font-semibold text-secondary-900 mb-3">
-              Supported File Formats
-            </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-3 bg-secondary-50 rounded-lg">
-                <h5 className="font-medium text-secondary-900 mb-2">Image Formats</h5>
-                <ul className="text-sm text-secondary-700 space-y-1">
-                  <li>• JPEG (.jpg, .jpeg)</li>
-                  <li>• PNG (.png)</li>
-                  <li>• Maximum size: 10MB</li>
-                </ul>
-              </div>
-              <div className="p-3 bg-secondary-50 rounded-lg">
-                <h5 className="font-medium text-secondary-900 mb-2">Document Formats</h5>
-                <ul className="text-sm text-secondary-700 space-y-1">
-                  <li>• PDF (.pdf)</li>
-                  <li>• Maximum size: 10MB</li>
-                  <li>• Single page preferred</li>
-                </ul>
-              </div>
-            </div>
-          </div>
         </div>
       </Modal>
     </div>

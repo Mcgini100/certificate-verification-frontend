@@ -1,431 +1,618 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { 
-  Upload, 
-  Database, 
-  CheckCircle, 
-  AlertCircle,
-  Users,
-  TrendingUp,
-  Activity,
-  FileText
-} from 'lucide-react';
 import { motion } from 'framer-motion';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { getStatistics, getCertificates } from '../../services/api';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  Area,
+  AreaChart
+} from 'recharts';
+import { 
+  Shield, 
+  FileText, 
+  CheckCircle, 
+  AlertTriangle, 
+  TrendingUp, 
+  Activity,
+  Database,
+  Lock,
+  Eye,
+  RefreshCw,
+  Clock,
+  Hash,
+  GitBranch,
+  Layers,
+  CheckCircle2,
+  AlertCircle,
+  Info
+} from 'lucide-react';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { 
+  getStatistics, 
+  getLedgerStats, 
+  getLedgerIntegrity, 
+  validateLedgerIntegrity,
+  getSystemHealth,
+  getLedgerEntries
+} from '../../services/api';
+import { toast } from 'react-toastify';
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
-  const [recentCertificates, setRecentCertificates] = useState([]);
+  const [ledgerStats, setLedgerStats] = useState(null);
+  const [ledgerIntegrity, setLedgerIntegrity] = useState(null);
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [recentTransactions, setRecentTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [apiConnected, setApiConnected] = useState(true);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchDashboardData = async () => {
     try {
-      setLoading(true);
-      setApiConnected(true);
-      
-      // Fetch statistics from real API
-      const statsData = await getStatistics();
-      setStats(statsData);
+      const [
+        statisticsData,
+        ledgerStatsData,
+        integrityData,
+        healthData,
+        recentTxData
+      ] = await Promise.all([
+        getStatistics(),
+        getLedgerStats(),
+        getLedgerIntegrity(),
+        getSystemHealth(),
+        getLedgerEntries({ limit: 10, offset: 0 }).catch(() => ({ entries: [] }))
+      ]);
 
-      // Fetch recent certificates from real API
-      const certificatesData = await getCertificates({ 
-        limit: 5,
-        sortBy: 'created_at',
-        sortOrder: 'desc'
-      });
-      
-      // Handle both array and object responses
-      const certificates = Array.isArray(certificatesData) 
-        ? certificatesData 
-        : certificatesData.certificates || [];
-        
-      setRecentCertificates(certificates);
-      
+      setStats(statisticsData);
+      setLedgerStats(ledgerStatsData);
+      setLedgerIntegrity(integrityData);
+      setSystemHealth(healthData);
+      setRecentTransactions(recentTxData.entries || []);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
-      setApiConnected(false);
-      
-      // Only use mock data as absolute fallback
-      console.warn('Using mock data as fallback - API connection failed');
-      setStats({
-        total_certificates: 0,
-        total_verifications: 0,
-        status_distribution: {
-          VERIFIED: 0,
-          VERIFIED_BY_DATA: 0,
-          FAILED: 0,
-          CORRUPTED_HASH: 0
-        },
-        database_size_bytes: 0,
-        recent_activity: {
-          uploads_today: 0,
-          verifications_today: 0,
-          success_rate: 0
-        }
-      });
-      
-      setRecentCertificates([]);
+      toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  // Refresh data function
-  const refreshData = () => {
+  useEffect(() => {
     fetchDashboardData();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchDashboardData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDashboardData();
   };
 
-  // Helper function to format bytes - moved before use
-  const formatBytes = (bytes) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  const handleValidateLedger = async () => {
+    try {
+      const result = await validateLedgerIntegrity();
+      if (result.is_valid) {
+        toast.success('Ledger integrity validation passed!');
+      } else {
+        toast.error('Ledger integrity validation failed!');
+      }
+      setLedgerIntegrity(result);
+    } catch (error) {
+      toast.error('Failed to validate ledger integrity');
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center min-h-[400px]">
         <LoadingSpinner size="large" />
       </div>
     );
   }
 
-  const quickActions = [
-    {
-      title: 'Upload Certificates',
-      description: 'Upload new certificates for processing',
-      icon: Upload,
-      link: '/admin/upload',
-      color: 'bg-blue-500',
-      bgColor: 'bg-blue-50',
-      borderColor: 'border-blue-200'
-    },
-    {
-      title: 'View Database',
-      description: 'Browse all certificates in the system',
-      icon: Database,
-      link: '/admin/database',
-      color: 'bg-green-500',
-      bgColor: 'bg-green-50',
-      borderColor: 'border-green-200'
-    },
-    {
-      title: 'Verify Certificates',
-      description: 'Verify and validate certificates',
-      icon: CheckCircle,
-      link: '/admin/verify',
-      color: 'bg-purple-500',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200'
-    }
-  ];
+  const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-  const statCards = [
-    {
-      title: 'Total Certificates',
-      value: stats?.total_certificates || 0,
-      icon: FileText,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-100',
-      change: stats?.recent_activity?.uploads_today ? `+${stats.recent_activity.uploads_today} today` : null
-    },
-    {
-      title: 'Total Verifications',
-      value: stats?.total_verifications || 0,
-      icon: Activity,
-      color: 'text-green-600',
-      bgColor: 'bg-green-100',
-      change: stats?.recent_activity?.verifications_today ? `+${stats.recent_activity.verifications_today} today` : null
-    },
-    {
-      title: 'Success Rate',
-      value: stats?.status_distribution && stats?.total_certificates > 0 ? 
-        `${Math.round(((stats.status_distribution.VERIFIED + stats.status_distribution.VERIFIED_BY_DATA) / stats.total_certificates) * 100)}%` : 
-        '0%',
-      icon: TrendingUp,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-100',
-      change: stats?.recent_activity?.success_rate ? `${stats.recent_activity.success_rate}% avg` : null
-    },
-    {
-      title: 'Database Size',
-      value: stats?.database_size_bytes ? 
-        formatBytes(stats.database_size_bytes) : 
-        '0 B',
-      icon: Database,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-100'
-    }
-  ];
+  // Prepare chart data
+  const verificationData = stats?.certificates?.verification_stats ? [
+    { name: 'Verified', value: stats.certificates.verification_stats.verified || 0, color: '#10B981' },
+    { name: 'Failed', value: stats.certificates.verification_stats.failed || 0, color: '#EF4444' },
+    { name: 'Pending', value: stats.certificates.verification_stats.pending || 0, color: '#F59E0B' },
+  ] : [];
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  // Prepare chart data from real API response
-  const statusData = stats?.status_distribution ? 
-    Object.entries(stats.status_distribution)
-      .filter(([status, count]) => count > 0) // Only show non-zero counts
-      .map(([status, count]) => ({
-        name: status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        value: count,
-        percentage: stats.total_certificates > 0 ? Math.round((count / stats.total_certificates) * 100) : 0
-      })) : [];
-
-  const COLORS = ['#10b981', '#3b82f6', '#ef4444', '#f59e0b'];
+  const transactionTrends = ledgerStats?.transaction_types ? 
+    Object.entries(ledgerStats.transaction_types).map(([type, count]) => ({
+      name: type.replace('_', ' ').toUpperCase(),
+      value: count
+    })) : [];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      {/* API Connection Status */}
-      {!apiConnected && (
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      {/* Header with Actions */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Admin Dashboard
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            Certificate verification system with immutable ledger
+          </p>
+        </div>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleValidateLedger}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+          >
+            <Shield className="w-4 h-4" />
+            <span>Validate Ledger</span>
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 flex items-center space-x-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* System Health Alert */}
+      {systemHealth && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between"
+          className={`p-4 rounded-lg border-l-4 ${
+            systemHealth.overall_status === 'healthy'
+              ? 'bg-green-50 border-green-400 text-green-800'
+              : systemHealth.overall_status === 'degraded'
+              ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
+              : 'bg-red-50 border-red-400 text-red-800'
+          }`}
         >
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
-            <div>
-              <p className="text-yellow-800 font-medium">API Connection Failed</p>
-              <p className="text-yellow-700 text-sm">Displaying cached/demo data. Check if the backend is running on port 8000.</p>
-            </div>
+          <div className="flex items-center space-x-2">
+            {systemHealth.overall_status === 'healthy' ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : systemHealth.overall_status === 'degraded' ? (
+              <AlertTriangle className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
+            )}
+            <span className="font-medium">
+              System Status: {systemHealth.overall_status.toUpperCase()}
+            </span>
+            {ledgerIntegrity && (
+              <span className="text-sm">
+                | Ledger Integrity: {ledgerIntegrity.is_valid ? 'VALID' : 'INVALID'}
+              </span>
+            )}
           </div>
-          <button
-            onClick={refreshData}
-            className="px-4 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 rounded-md text-sm font-medium transition-colors"
-          >
-            Retry Connection
-          </button>
         </motion.div>
       )}
 
-      {/* Welcome Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="mb-8"
-      >
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-secondary-900 mb-2">
-              Admin Dashboard
-            </h1>
-            <p className="text-secondary-600">
-              Manage and monitor the certificate verification system
-            </p>
+      {/* Key Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Total Certificates */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Total Certificates
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                {stats?.certificates?.total_certificates || 0}
+              </p>
+            </div>
+            <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
+              <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            </div>
           </div>
-          {apiConnected && (
-            <button
-              onClick={refreshData}
-              className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-sm font-medium transition-colors flex items-center"
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Refresh Data
-            </button>
-          )}
-        </div>
-      </motion.div>
+          <div className="mt-4 flex items-center text-sm">
+            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
+            <span className="text-green-600 dark:text-green-400">
+              {stats?.certificates?.recent_uploads || 0} this week
+            </span>
+          </div>
+        </motion.div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {statCards.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: index * 0.1 }}
-              className="card"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-secondary-600 mb-1">
-                    {stat.title}
-                  </p>
-                  <p className="text-2xl font-bold text-secondary-900">
-                    {stat.value}
-                  </p>
-                  {stat.change && (
-                    <p className="text-xs text-secondary-500 mt-1">
-                      {stat.change}
-                    </p>
-                  )}
-                </div>
-                <div className={`p-3 rounded-lg ${stat.bgColor}`}>
-                  <Icon className={`h-6 w-6 ${stat.color}`} />
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
+        {/* Ledger Transactions */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Ledger Transactions
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                {ledgerStats?.total_entries || 0}
+              </p>
+            </div>
+            <div className="p-3 bg-purple-100 dark:bg-purple-900 rounded-full">
+              <GitBranch className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Layers className="w-4 h-4 text-purple-500 mr-1" />
+            <span className="text-purple-600 dark:text-purple-400">
+              Block #{ledgerStats?.last_block_number || 0}
+            </span>
+          </div>
+        </motion.div>
+
+        {/* Verification Success Rate */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Success Rate
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                {stats?.certificates?.verification_stats 
+                  ? Math.round(
+                      (stats.certificates.verification_stats.verified / 
+                       (stats.certificates.verification_stats.verified + stats.certificates.verification_stats.failed || 1)) * 100
+                    )
+                  : 0}%
+              </p>
+            </div>
+            <div className="p-3 bg-green-100 dark:bg-green-900 rounded-full">
+              <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Activity className="w-4 h-4 text-green-500 mr-1" />
+            <span className="text-green-600 dark:text-green-400">
+              {stats?.certificates?.verification_stats?.verified || 0} verified
+            </span>
+          </div>
+        </motion.div>
+
+        {/* Ledger Integrity */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Ledger Integrity
+              </p>
+              <p className={`text-2xl font-bold ${
+                ledgerIntegrity?.is_valid 
+                  ? 'text-green-600 dark:text-green-400' 
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {ledgerIntegrity?.is_valid ? 'VALID' : 'INVALID'}
+              </p>
+            </div>
+            <div className={`p-3 rounded-full ${
+              ledgerIntegrity?.is_valid 
+                ? 'bg-green-100 dark:bg-green-900' 
+                : 'bg-red-100 dark:bg-red-900'
+            }`}>
+              <Lock className={`w-6 h-6 ${
+                ledgerIntegrity?.is_valid 
+                  ? 'text-green-600 dark:text-green-400' 
+                  : 'text-red-600 dark:text-red-400'
+              }`} />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Hash className="w-4 h-4 text-gray-500 mr-1" />
+            <span className="text-gray-600 dark:text-gray-400">
+              {ledgerStats?.unique_certificates || 0} unique certs
+            </span>
+          </div>
+        </motion.div>
       </div>
 
-      {/* Charts and Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {/* Status Distribution Chart */}
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Verification Status Distribution */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
         >
-          <h3 className="text-lg font-semibold text-secondary-900 mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Verification Status Distribution
           </h3>
-          {statusData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={statusData}
+                  data={verificationData}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percentage }) => `${name}: ${percentage}%`}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                   outerRadius={80}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {statusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {verificationData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value, name) => [`${value} certificates`, name]} />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-secondary-500">
-              <div className="text-center">
-                <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No data available</p>
-                {apiConnected && (
-                  <p className="text-sm">Upload some certificates to see statistics</p>
-                )}
-              </div>
-            </div>
-          )}
+          </div>
         </motion.div>
 
-        {/* Recent Certificates */}
+        {/* Transaction Types */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.5 }}
-          className="card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
         >
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-secondary-900">
-              Recent Certificates
-            </h3>
-            <Link
-              to="/admin/database"
-              className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-            >
-              View all →
-            </Link>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Ledger Transaction Types
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={transactionTrends}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fontSize: 12 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={60}
+                />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="value" fill="#3B82F6" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-          
-          {recentCertificates.length > 0 ? (
-            <div className="space-y-3">
-              {recentCertificates.slice(0, 5).map((cert, index) => (
-                <div
-                  key={cert.certificate_number || index}
-                  className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg"
-                >
-                  <div className="flex-1">
-                    <p className="font-medium text-secondary-900">
-                      {cert.certificate_number || `Certificate ${index + 1}`}
-                    </p>
-                    <p className="text-sm text-secondary-600">
-                      {cert.certificate_data?.['Student Name'] || 'Unknown Student'}
-                    </p>
-                    <p className="text-xs text-secondary-500">
-                      {cert.created_at ? new Date(cert.created_at).toLocaleDateString() : 'Unknown Date'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      cert.verification_status === 'VERIFIED' 
-                        ? 'bg-green-100 text-green-800'
-                        : cert.verification_status === 'VERIFIED_BY_DATA'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {cert.verification_status || 'Unknown'}
-                    </span>
-                    {cert.confidence && (
-                      <p className="text-xs text-secondary-500 mt-1">
-                        {Math.round(cert.confidence * 100)}% confidence
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+        </motion.div>
+      </div>
+
+      {/* Recent Ledger Transactions */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.7 }}
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+      >
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Recent Ledger Transactions
+            </h3>
+            <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+              <Clock className="w-4 h-4" />
+              <span>Real-time updates</span>
             </div>
-          ) : (
-            <div className="flex items-center justify-center h-48 text-secondary-500">
-              <div className="text-center">
-                <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No certificates found</p>
-                {apiConnected && (
-                  <p className="text-sm">Upload certificates to see them here</p>
-                )}
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-gray-700">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Transaction ID
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Type
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Certificate
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Block #
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Timestamp
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+              {recentTransactions.length > 0 ? (
+                recentTransactions.map((transaction, index) => (
+                  <tr key={transaction.transaction_id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">
+                      {transaction.transaction_id?.substring(0, 8)}...
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        transaction.transaction_type === 'CREATE' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : transaction.transaction_type === 'UPDATE'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                          : transaction.transaction_type === 'VERIFY'
+                          ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                      }`}>
+                        {transaction.transaction_type}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                      {transaction.certificate_number || 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                      #{transaction.block_number}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {new Date(transaction.timestamp).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                        <span className="text-sm text-green-600 dark:text-green-400">
+                          Confirmed
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                    No recent transactions found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+
+      {/* Ledger Health Details */}
+      {ledgerIntegrity && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.8 }}
+          className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Ledger Health Details
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <span className="font-medium text-gray-900 dark:text-white">
+                  Total Entries
+                </span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
+                {ledgerIntegrity.total_entries}
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-green-600 dark:text-green-400" />
+                <span className="font-medium text-gray-900 dark:text-white">
+                  Unique Certificates
+                </span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
+                {ledgerIntegrity.unique_certificates}
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Hash className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <span className="font-medium text-gray-900 dark:text-white">
+                  Last Block Hash
+                </span>
+              </div>
+              <p className="text-sm font-mono text-gray-600 dark:text-gray-400 mt-2 truncate">
+                {ledgerIntegrity.last_hash?.substring(0, 16)}...
+              </p>
+            </div>
+          </div>
+          {ledgerIntegrity.transaction_types && (
+            <div className="mt-4">
+              <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+                Transaction Distribution:
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(ledgerIntegrity.transaction_types).map(([type, count]) => (
+                  <span
+                    key={type}
+                    className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                  >
+                    {type}: {count}
+                  </span>
+                ))}
               </div>
             </div>
           )}
         </motion.div>
-      </div>
+      )}
 
       {/* Quick Actions */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.6 }}
-        className="mb-8"
+        transition={{ delay: 0.9 }}
+        className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700"
       >
-        <h3 className="text-lg font-semibold text-secondary-900 mb-4">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
           Quick Actions
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {quickActions.map((action, index) => {
-            const Icon = action.icon;
-            return (
-              <Link
-                key={index}
-                to={action.link}
-                className={`block p-6 rounded-lg border-2 ${action.borderColor} ${action.bgColor} hover:shadow-md transition-all duration-200 hover:scale-105`}
-              >
-                <div className="flex items-center mb-3">
-                  <div className={`p-2 rounded-lg ${action.color} mr-3`}>
-                    <Icon className="h-6 w-6 text-white" />
-                  </div>
-                  <h4 className="text-lg font-semibold text-secondary-900">
-                    {action.title}
-                  </h4>
-                </div>
-                <p className="text-secondary-600 text-sm">
-                  {action.description}
-                </p>
-              </Link>
-            );
-          })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <button
+            onClick={() => window.location.href = '/admin/upload'}
+            className="p-4 text-left bg-blue-50 dark:bg-blue-900 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
+          >
+            <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400 mb-2" />
+            <h4 className="font-medium text-gray-900 dark:text-white">
+              Upload Certificate
+            </h4>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Add new certificate to ledger
+            </p>
+          </button>
+          <button
+            onClick={() => window.location.href = '/admin/verify'}
+            className="p-4 text-left bg-green-50 dark:bg-green-900 rounded-lg hover:bg-green-100 dark:hover:bg-green-800 transition-colors"
+          >
+            <Shield className="w-8 h-8 text-green-600 dark:text-green-400 mb-2" />
+            <h4 className="font-medium text-gray-900 dark:text-white">
+              Verify Certificate
+            </h4>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Verify with ledger check
+            </p>
+          </button>
+          <button
+            onClick={() => window.location.href = '/admin/database'}
+            className="p-4 text-left bg-purple-50 dark:bg-purple-900 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-800 transition-colors"
+          >
+            <Database className="w-8 h-8 text-purple-600 dark:text-purple-400 mb-2" />
+            <h4 className="font-medium text-gray-900 dark:text-white">
+              Browse Ledger
+            </h4>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Explore certificate history
+            </p>
+          </button>
+          <button
+            onClick={handleValidateLedger}
+            className="p-4 text-left bg-yellow-50 dark:bg-yellow-900 rounded-lg hover:bg-yellow-100 dark:hover:bg-yellow-800 transition-colors"
+          >
+            <Lock className="w-8 h-8 text-yellow-600 dark:text-yellow-400 mb-2" />
+            <h4 className="font-medium text-gray-900 dark:text-white">
+              Validate Integrity
+            </h4>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Check ledger consistency
+            </p>
+          </button>
         </div>
       </motion.div>
     </div>
