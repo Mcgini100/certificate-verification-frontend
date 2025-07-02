@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import FileUpload from '../../components/common/FileUpload';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import Modal from '../../components/common/Modal';
-import { verifyCertificate, batchVerify, extractHash, verifyByHash } from '../../services/api';
+import { verifyCertificate, batchVerify, batchVerifyFallback, extractHash, verifyByHash } from '../../services/api';
 
 const AdminVerify = () => {
   const [verificationMode, setVerificationMode] = useState('upload'); // 'upload', 'batch', 'hash'
@@ -17,7 +17,7 @@ const AdminVerify = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedResult, setSelectedResult] = useState(null);
 
-  // ✅ ENHANCED: Function to check if verification is successful
+  // ✅ Enhanced: Function to check if verification is successful
   const isVerificationSuccessful = (result) => {
     return (
       result.certificate_exists_in_ledger ||  // ✅ Key addition: existing certificates are successful
@@ -26,7 +26,7 @@ const AdminVerify = () => {
     );
   };
 
-  // ✅ ENHANCED: Get appropriate success message
+  // ✅ Enhanced: Get appropriate success message
   const getSuccessMessage = (result) => {
     if (result.certificate_exists_in_ledger) {
       return 'Certificate verified! Found in secure ledger';
@@ -46,7 +46,7 @@ const AdminVerify = () => {
   };
 
   const getDisplayMessage = (result) => {
-    // ✅ ENHANCED: Show positive messages for verified certificates
+    // ✅ Enhanced: Show positive messages for verified certificates
     if (isVerificationSuccessful(result)) {
       return getSuccessMessage(result);
     }
@@ -59,8 +59,15 @@ const AdminVerify = () => {
     setResults([]);
   }, [verificationMode]);
 
+  // ✅ Enhanced: Better file selection handling
   const handleFilesSelect = (selectedFiles) => {
-    console.log('Files selected for verification:', selectedFiles); // Debug log
+    console.log('📁 Files selected for verification:');
+    selectedFiles.forEach((file, index) => {
+      const fileName = file.name || file.file?.name || 'unknown';
+      const fileSize = file.size || file.file?.size || 0;
+      console.log(`  ${index + 1}. ${fileName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+    });
+    
     setFiles(selectedFiles);
     setResults([]);
   };
@@ -81,7 +88,7 @@ const AdminVerify = () => {
 
     setProcessing(true);
     try {
-      const file = files[0].file;
+      const file = files[0].file || files[0];
       const options = {
         use_enhanced_extraction: true,
         check_database: true
@@ -97,7 +104,7 @@ const AdminVerify = () => {
       
       setResults([completeResult]);
 
-      // ✅ ENHANCED: Show appropriate success/failure toast
+      // ✅ Enhanced: Show appropriate success/failure toast
       if (isVerificationSuccessful(completeResult)) {
         toast.success(getSuccessMessage(completeResult));
       } else {
@@ -105,7 +112,7 @@ const AdminVerify = () => {
       }
     } catch (error) {
       setResults([{
-        filename: files[0].file.name,
+        filename: files[0].file?.name || files[0].name,
         verification_status: 'ERROR',
         message: error.message,
         confidence: 0,
@@ -128,37 +135,95 @@ const AdminVerify = () => {
       return;
     }
 
+    console.log(`🚀 Starting batch verification of ${files.length} files`);
     setProcessing(true);
+    
     try {
-      const fileObjects = files.map(f => f.file);
+      // ✅ FIX: Extract actual File objects from the files array
+      const fileObjects = files.map(fileItem => {
+        // Handle both direct File objects and wrapped objects
+        if (fileItem instanceof File) {
+          return fileItem;
+        } else if (fileItem.file instanceof File) {
+          return fileItem.file;
+        } else {
+          console.error('Invalid file object:', fileItem);
+          throw new Error(`Invalid file object for ${fileItem.name || 'unknown file'}`);
+        }
+      });
+
+      console.log('📋 File objects prepared:', fileObjects.map(f => ({ name: f.name, size: f.size })));
+
       const options = {
         use_enhanced_extraction: true,
-        check_database: true
+        check_database: true,
+        continue_on_error: true
       };
 
-      const results = await batchVerify(fileObjects, options);
-      
-      const processedResults = results.map((result, index) => ({
-        filename: fileObjects[index].name,
-        ...result,
-        processed_at: new Date().toISOString()
-      }));
+      // ✅ FIX: Try batch API first, fallback to individual verification
+      let batchResult;
+      try {
+        console.log('📡 Attempting batch API...');
+        batchResult = await batchVerify(fileObjects, options);
+        console.log('✅ Batch API succeeded:', batchResult);
+      } catch (batchError) {
+        console.log('❌ Batch API failed, falling back to individual verification:', batchError.message);
+        batchResult = await batchVerifyFallback(fileObjects, options);
+        console.log('✅ Individual verification fallback completed:', batchResult);
+      }
+
+      // ✅ FIX: Process results with proper error handling
+      const processedResults = batchResult.results.map((result, index) => {
+        const originalFile = files[index];
+        return {
+          filename: result.filename || originalFile?.name || originalFile?.file?.name || `file_${index}`,
+          verification_status: result.verification_status || 'ERROR',
+          confidence: result.confidence || 0,
+          message: result.message || 'No message',
+          hash: result.hash || null,
+          certificate_data: result.certificate_data || {},
+          extraction_method: result.extraction_method || null,
+          similarity_score: result.similarity_score || null,
+          certificate_exists_in_ledger: result.certificate_exists_in_ledger || false,
+          processed_at: new Date().toISOString()
+        };
+      });
 
       setResults(processedResults);
 
-      // ✅ ENHANCED: Count successful verifications including ledger matches
-      const successful = processedResults.filter(result => isVerificationSuccessful(result)).length;
-      const total = processedResults.length;
+      // ✅ FIX: Better success calculation
+      const successfulCount = processedResults.filter(result => isVerificationSuccessful(result)).length;
 
-      if (successful === total) {
-        toast.success(`All ${total} certificates verified successfully!`);
-      } else if (successful > 0) {
-        toast.warning(`${successful}/${total} certificates verified successfully`);
+      // Show appropriate toast message
+      if (successfulCount === processedResults.length) {
+        toast.success(`🎉 All ${successfulCount} certificates verified successfully!`);
+      } else if (successfulCount > 0) {
+        toast.warning(`⚠️ Partial success: ${successfulCount}/${processedResults.length} certificates verified`);
       } else {
-        toast.error('No certificates could be verified');
+        toast.error(`❌ All verifications failed. Check file formats and try again.`);
       }
+
+      console.log(`📊 Batch verification completed: ${successfulCount}/${processedResults.length} successful`);
+
     } catch (error) {
-      toast.error('Batch verification failed: ' + error.message);
+      console.error('❌ Batch verification completely failed:', error);
+      toast.error(`Batch verification failed: ${error.message}`);
+      
+      // Create error results for all files
+      const errorResults = files.map((fileItem, index) => ({
+        filename: fileItem.name || fileItem.file?.name || `file_${index}`,
+        verification_status: 'ERROR',
+        confidence: 0,
+        message: error.message || 'Unknown error occurred',
+        hash: null,
+        certificate_data: {},
+        extraction_method: null,
+        similarity_score: null,
+        certificate_exists_in_ledger: false,
+        processed_at: new Date().toISOString()
+      }));
+      
+      setResults(errorResults);
     } finally {
       setProcessing(false);
     }
@@ -225,7 +290,7 @@ const AdminVerify = () => {
     setShowDetailsModal(true);
   };
 
-  // ✅ ENHANCED: Better status color handling
+  // ✅ Enhanced: Better status color handling
   const getStatusColor = (status, certificateExists = false) => {
     // If certificate exists in ledger, always show as success
     if (certificateExists) {
@@ -249,7 +314,7 @@ const AdminVerify = () => {
     }
   };
 
-  // ✅ ENHANCED: Better status icon handling
+  // ✅ Enhanced: Better status icon handling
   const getStatusIcon = (status, certificateExists = false) => {
     // If certificate exists in ledger, always show success icon
     if (certificateExists || isVerificationSuccessful({ verification_status: status, certificate_exists_in_ledger: certificateExists })) {
@@ -377,6 +442,11 @@ const AdminVerify = () => {
               onFilesSelect={handleFilesSelect}
               acceptedTypes={['image/*', '.pdf']}
               maxFiles={verificationMode === 'batch' ? 10 : 1}
+              multiple={verificationMode === 'batch'}
+              placeholder={verificationMode === 'batch' 
+                ? "Select multiple files (Ctrl+Click or Cmd+Click to select multiple)"
+                : "Select a single file to verify"
+              }
               className="mb-4"
             />
           </div>
@@ -451,7 +521,7 @@ const AdminVerify = () => {
               Verification Results ({results.length})
             </h2>
             <div className="text-sm text-secondary-600">
-              {/* ✅ ENHANCED: Better success count calculation */}
+              {/* ✅ Enhanced: Better success count calculation */}
               {(() => {
                 const successful = results.filter(result => isVerificationSuccessful(result)).length;
                 const total = results.length;
@@ -477,7 +547,7 @@ const AdminVerify = () => {
                         <h3 className="font-medium text-secondary-900">
                           {result.filename}
                         </h3>
-                        {/* ✅ ENHANCED: Better status display */}
+                        {/* ✅ Enhanced: Better status display */}
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           isVerificationSuccessful(result)
                             ? 'bg-green-100 text-green-800'
@@ -579,7 +649,7 @@ const AdminVerify = () => {
                 </div>
               </div>
               
-              {/* ✅ ENHANCED: Better message display */}
+              {/* ✅ Enhanced: Better message display */}
               <div className="mt-4">
                 <label className="text-sm font-medium text-secondary-700 block mb-2">
                   Message

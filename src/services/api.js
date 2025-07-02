@@ -4,7 +4,7 @@ import { toast } from 'react-toastify';
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1',
-  timeout: 40000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -40,7 +40,7 @@ api.interceptors.response.use(
   }
 );
 
-// Health check with ledger status
+// Health check
 export const healthCheck = async () => {
   try {
     const response = await api.get('/health');
@@ -51,79 +51,18 @@ export const healthCheck = async () => {
   }
 };
 
-// ==============================================================================
-// IMMUTABLE LEDGER OPERATIONS (NEW)
-// ==============================================================================
-
-// Ledger integrity and validation
-export const validateLedgerIntegrity = async () => {
+// ✅ Added system health function (alias for healthCheck for AdminDashboard compatibility)
+export const getSystemHealth = async () => {
   try {
-    const response = await api.get('/ledger/validate');
+    const response = await api.get('/health');
     return response.data;
   } catch (error) {
-    console.error('Ledger validation failed:', error);
-    toast.error('Failed to validate ledger integrity');
+    console.error('System health check failed:', error);
     throw error;
   }
 };
 
-export const getLedgerIntegrity = async () => {
-  try {
-    const response = await api.get('/ledger/integrity');
-    return response.data;
-  } catch (error) {
-    console.error('Failed to get ledger integrity:', error);
-    throw error;
-  }
-};
-
-export const getLedgerStats = async () => {
-  try {
-    const response = await api.get('/ledger/stats');
-    return response.data;
-  } catch (error) {
-    console.error('Failed to get ledger statistics:', error);
-    throw error;
-  }
-};
-
-// Ledger entries management
-export const getLedgerEntries = async (params = {}) => {
-  try {
-    const response = await api.get('/ledger/entries', { params });
-    return response.data;
-  } catch (error) {
-    console.error('Failed to fetch ledger entries:', error);
-    throw error;
-  }
-};
-
-export const getCertificateHistory = async (certificateNumber) => {
-  try {
-    const response = await api.get(`/ledger/history/${certificateNumber}`);
-    return response.data;
-  } catch (error) {
-    console.error('Failed to fetch certificate history:', error);
-    throw error;
-  }
-};
-
-// Record verification in ledger
-export const recordVerification = async (certificateNumber, verificationData) => {
-  try {
-    const response = await api.post(`/ledger/verify/${certificateNumber}`, verificationData);
-    return response.data;
-  } catch (error) {
-    console.error('Failed to record verification:', error);
-    toast.error('Failed to record verification in ledger');
-    throw error;
-  }
-};
-
-// ==============================================================================
-// CERTIFICATE MANAGEMENT (UPDATED FOR LEDGER)
-// ==============================================================================
-
+// Certificate Management
 export const uploadCertificate = async (file, options = {}) => {
   try {
     const formData = new FormData();
@@ -131,9 +70,7 @@ export const uploadCertificate = async (file, options = {}) => {
     
     // Add optional parameters
     Object.keys(options).forEach(key => {
-      if (options[key] !== undefined && options[key] !== null) {
-        formData.append(key, options[key]);
-      }
+      formData.append(key, options[key]);
     });
 
     const response = await api.post('/certificates/upload', formData, {
@@ -142,7 +79,6 @@ export const uploadCertificate = async (file, options = {}) => {
       },
     });
     
-    toast.success('Certificate uploaded successfully to immutable ledger!');
     return response.data;
   } catch (error) {
     console.error('Upload failed:', error);
@@ -162,9 +98,7 @@ export const uploadBatchCertificates = async (files, options = {}) => {
     
     // Add options
     Object.keys(options).forEach(key => {
-      if (options[key] !== undefined && options[key] !== null) {
-        formData.append(key, JSON.stringify(options[key]));
-      }
+      formData.append(key, options[key]);
     });
 
     const response = await api.post('/certificates/batch-upload', formData, {
@@ -173,7 +107,6 @@ export const uploadBatchCertificates = async (files, options = {}) => {
       },
     });
     
-    toast.success('Batch certificates uploaded to immutable ledger!');
     return response.data;
   } catch (error) {
     console.error('Batch upload failed:', error);
@@ -202,22 +135,9 @@ export const getCertificate = async (certificateNumber) => {
   }
 };
 
-export const updateCertificate = async (certificateNumber, updateData) => {
-  try {
-    const response = await api.put(`/certificates/${certificateNumber}`, updateData);
-    toast.success('Certificate updated in ledger!');
-    return response.data;
-  } catch (error) {
-    console.error('Failed to update certificate:', error);
-    toast.error(error.response?.data?.detail || 'Update failed');
-    throw error;
-  }
-};
-
 export const deleteCertificate = async (certificateNumber) => {
   try {
     const response = await api.delete(`/certificates/${certificateNumber}`);
-    toast.success('Certificate deletion recorded in ledger!');
     return response.data;
   } catch (error) {
     console.error('Failed to delete certificate:', error);
@@ -226,309 +146,20 @@ export const deleteCertificate = async (certificateNumber) => {
   }
 };
 
-// ==============================================================================
-// VERIFICATION OPERATIONS (ENHANCED FOR LEDGER)
-// ==============================================================================
-
-export const verifyCertificate = async (file, options = {}) => {
+export const getCertificateHistory = async (certificateNumber) => {
   try {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    Object.keys(options).forEach(key => {
-      if (options[key] !== undefined && options[key] !== null) {
-        formData.append(key, options[key]);
-      }
-    });
-
-    const response = await api.post('/verify/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 45000,
-    });
-    
-    // ✅ ENHANCED: Handle existing certificates as successful
-    const result = response.data;
-    
-    // Check if certificate exists in ledger and treat as success
-    if (result.certificate_exists_in_ledger || 
-        result.verification_status === 'VERIFIED' || 
-        result.verification_status === 'VERIFIED_BY_DATA') {
-      
-      // Show success message for existing certificates
-      if (result.certificate_exists_in_ledger) {
-        toast.success(`✅ Certificate verified! Found in secure ledger with ${(result.confidence * 100).toFixed(1)}% confidence`);
-      } else {
-        toast.success('✅ Certificate verification successful!');
-      }
-    } else {
-      toast.error('❌ Certificate verification failed!');
-    }
-    
-    // Automatically record verification in ledger if certificate number is available
-    if (result.certificate_number) {
-      try {
-        await recordVerification(result.certificate_number, {
-          verified_by: 'frontend_user',
-          verification_method: 'file_upload',
-          result: result.verification_status,
-          confidence: result.confidence || 0,
-          verification_details: {
-            hash_match: result.hash_match,
-            data_match: result.data_match,
-            processing_time: result.processing_time,
-            certificate_exists_in_ledger: result.certificate_exists_in_ledger
-          }
-        });
-      } catch (ledgerError) {
-        console.warn('Failed to record verification in ledger:', ledgerError);
-      }
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Verification failed:', error);
-    if (error.code === 'ECONNABORTED') {
-      toast.error('Verification timed out after 45 seconds. Please try with a clearer image or contact support.');
-    } else {
-      toast.error(error.response?.data?.detail || 'Verification failed');
-    }
-    throw error;
-  }
-};
-
-export const verifyBatchCertificates = async (files, options = {}) => {
-  try {
-    const formData = new FormData();
-    
-    // Add all files
-    files.forEach(file => {
-      formData.append('files', file);
-    });
-    
-    // Add options
-    Object.keys(options).forEach(key => {
-      if (options[key] !== undefined && options[key] !== null) {
-        formData.append(key, JSON.stringify(options[key]));
-      }
-    });
-
-    const response = await api.post('/verify/batch', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    
-    // Record batch verification results in ledger
-    if (response.data.results && Array.isArray(response.data.results)) {
-      response.data.results.forEach(async (result) => {
-        if (result.certificate_number) {
-          try {
-            await recordVerification(result.certificate_number, {
-              verified_by: 'frontend_batch',
-              verification_method: 'batch_upload',
-              result: result.verification_status,
-              confidence: result.confidence || 0,
-              verification_details: {
-                filename: result.filename,
-                hash_match: result.hash_match,
-                data_match: result.data_match
-              }
-            });
-          } catch (ledgerError) {
-            console.warn(`Failed to record batch verification for ${result.certificate_number}:`, ledgerError);
-          }
-        }
-      });
-    }
-    
+    const response = await api.get(`/certificates/${certificateNumber}/history`);
     return response.data;
   } catch (error) {
-    console.error('Batch verification failed:', error);
-    toast.error(error.response?.data?.detail || 'Batch verification failed');
+    console.error('Failed to fetch certificate history:', error);
     throw error;
   }
 };
 
-export const extractHash = async (file, useEnhanced = true) => {
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('use_enhanced', useEnhanced);
-
-    const response = await api.post('/verify/extract-hash', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    
-    return response.data;
-  } catch (error) {
-    console.error('Hash extraction failed:', error);
-    throw error;
-  }
-};
-
-export const verifyByHash = async (certificateNumber, providedHash) => {
-  try {
-    const response = await api.post('/verify/by-hash', {
-      certificate_number: certificateNumber,
-      provided_hash: providedHash
-    });
-    
-    // Record hash verification in ledger
-    try {
-      await recordVerification(certificateNumber, {
-        verified_by: 'frontend_hash',
-        verification_method: 'hash_comparison',
-        result: response.data.verification_status,
-        confidence: response.data.confidence || 0,
-        verification_details: {
-          provided_hash: providedHash,
-          stored_hash: response.data.stored_hash,
-          hash_match: response.data.hash_match
-        }
-      });
-    } catch (ledgerError) {
-      console.warn('Failed to record hash verification in ledger:', ledgerError);
-    }
-    
-    return response.data;
-  } catch (error) {
-    console.error('Hash verification failed:', error);
-    throw error;
-  }
-};
-
-// ==============================================================================
-// STATISTICS AND ANALYTICS (ENHANCED WITH LEDGER DATA)
-// ==============================================================================
-
-export const getStatistics = async () => {
-  try {
-    // Get both certificate stats and ledger stats
-    const [certStats, ledgerStats] = await Promise.all([
-      api.get('/certificates/stats/summary'),
-      api.get('/ledger/stats')
-    ]);
-    
-    return {
-      certificates: certStats.data,
-      ledger: ledgerStats.data,
-      combined: {
-        total_certificates: certStats.data.total_certificates || 0,
-        total_transactions: ledgerStats.data.total_entries || 0,
-        ledger_integrity: ledgerStats.data.is_valid || false,
-        last_updated: new Date().toISOString()
-      }
-    };
-  } catch (error) {
-    console.error('Failed to fetch statistics:', error);
-    throw error;
-  }
-};
-
-export const getAdvancedAnalytics = async () => {
-  try {
-    const response = await api.get('/analytics/advanced');
-    return response.data;
-  } catch (error) {
-    console.error('Failed to fetch advanced analytics:', error);
-    // Return fallback data if analytics endpoint doesn't exist
-    return {
-      verification_trends: [],
-      certificate_types: {},
-      monthly_stats: {},
-      ledger_health: { status: 'unknown' }
-    };
-  }
-};
-
-// ==============================================================================
-// ENHANCED SECURITY OPERATIONS
-// ==============================================================================
-
-export const embedHash = async (certificateNumber, options = {}) => {
-  try {
-    const response = await api.post(`/certificates/${certificateNumber}/embed-hash`, options);
-    toast.success('Hash embedded successfully with ledger record!');
-    return response.data;
-  } catch (error) {
-    console.error('Hash embedding failed:', error);
-    toast.error(error.response?.data?.detail || 'Hash embedding failed');
-    throw error;
-  }
-};
-
-export const addWatermark = async (certificateNumber, watermarkOptions) => {
-  try {
-    const response = await api.post(`/certificates/${certificateNumber}/watermark`, watermarkOptions);
-    toast.success('Watermark added with ledger record!');
-    return response.data;
-  } catch (error) {
-    console.error('Watermark addition failed:', error);
-    toast.error(error.response?.data?.detail || 'Watermark addition failed');
-    throw error;
-  }
-};
-
-// ==============================================================================
-// SYSTEM MONITORING AND MAINTENANCE
-// ==============================================================================
-
-export const getSystemHealth = async () => {
-  try {
-    const [health, ledgerIntegrity] = await Promise.all([
-      api.get('/health'),
-      api.get('/ledger/integrity')
-    ]);
-    
-    return {
-      api_health: health.data,
-      ledger_health: ledgerIntegrity.data,
-      overall_status: health.data.status === 'healthy' && ledgerIntegrity.data.is_valid ? 'healthy' : 'degraded'
-    };
-  } catch (error) {
-    console.error('Failed to get system health:', error);
-    return {
-      api_health: { status: 'error' },
-      ledger_health: { is_valid: false },
-      overall_status: 'error'
-    };
-  }
-};
-
-export const performLedgerMaintenance = async (operation) => {
-  try {
-    const response = await api.post('/ledger/maintenance', { operation });
-    toast.success(`Ledger ${operation} completed successfully!`);
-    return response.data;
-  } catch (error) {
-    console.error('Ledger maintenance failed:', error);
-    toast.error(error.response?.data?.detail || 'Ledger maintenance failed');
-    throw error;
-  }
-};
-
-// ==============================================================================
-// BACKWARDS COMPATIBILITY HELPERS
-// ==============================================================================
-
-// Legacy function names for backwards compatibility
-export const getCertificateDetails = getCertificate;
-export const searchCertificates = getCertificates;
-
-// ==============================================================================
-// MISSING FUNCTIONS (ADDED FOR COMPATIBILITY)
-// ==============================================================================
-
-
-
-// ✅ FIXED: Download Functions with correct format handling
+// Download Functions
 export const downloadProcessedCertificate = async (certificateNumber, options = {}) => {
   try {
-    // ✅ FIX: Always request PNG since processed files are always PNG
+    // ✅ Fixed: Always request PNG since processed files are always PNG
     const params = new URLSearchParams({
       include_markers: options.includeMarkers !== false ? 'true' : 'false',
       format: 'png'  // ✅ Fixed: Always PNG
@@ -538,7 +169,7 @@ export const downloadProcessedCertificate = async (certificateNumber, options = 
       responseType: 'blob'
     });
 
-    // ✅ FIX: Always create blob as PNG and use .png extension
+    // ✅ Fixed: Always create blob as PNG and use .png extension
     const blob = new Blob([response.data], { type: 'image/png' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -560,7 +191,6 @@ export const downloadProcessedCertificate = async (certificateNumber, options = 
 
 export const downloadOriginalCertificate = async (certificateNumber, options = {}) => {
   try {
-    // ✅ Note: Original files can be different formats, so we keep format parameter
     const params = new URLSearchParams({
       format: options.format || 'png'
     });
@@ -569,7 +199,7 @@ export const downloadOriginalCertificate = async (certificateNumber, options = {
       responseType: 'blob'
     });
 
-    // ✅ FIX: Use the content-type from response headers
+    // ✅ Fixed: Use the content-type from response headers
     const contentType = response.headers['content-type'] || 'image/png';
     const extension = contentType.includes('jpeg') ? 'jpg' : 
                      contentType.includes('pdf') ? 'pdf' : 'png';
@@ -593,10 +223,9 @@ export const downloadOriginalCertificate = async (certificateNumber, options = {
   }
 };
 
-// ✅ UPDATED: Main download function with better logic
 export const downloadCertificate = async (certificateNumber, options = {}) => {
   try {
-    // Always try processed first (since that's what users usually want)
+    // Default to processed if available, otherwise original
     return await downloadProcessedCertificate(certificateNumber, options);
   } catch (error) {
     console.log('Processed version not available, trying original...');
@@ -604,7 +233,6 @@ export const downloadCertificate = async (certificateNumber, options = {}) => {
   }
 };
 
-// ✅ UPDATED: Download with options function
 export const downloadCertificateWithOptions = async (certificateNumber, downloadOptions = {}) => {
   try {
     const {
@@ -635,7 +263,7 @@ export const downloadCertificateWithOptions = async (certificateNumber, download
   }
 };
 
-// ✅ UPDATED: Batch download function
+// Batch download function
 export const downloadAllProcessedCertificates = async (certificateNumbers, options = {}) => {
   try {
     const includeMarkers = options.includeMarkers !== false;
@@ -678,144 +306,307 @@ export const downloadAllProcessedCertificates = async (certificateNumbers, optio
   }
 };
 
-// Batch verification function (alias for existing function)
-export const batchVerify = verifyBatchCertificates;
-
-// User verification history function
-export const getUserVerifications = async (userId = 'current', params = {}) => {
+// Verification
+export const verifyCertificate = async (file, options = {}) => {
   try {
-    // If no specific user endpoint exists, return from localStorage as fallback
-    const localHistory = JSON.parse(localStorage.getItem('userVerificationHistory') || '[]');
+    const formData = new FormData();
+    formData.append('file', file);
     
-    // Try to get from API first
-    try {
-      const response = await api.get(`/users/${userId}/verifications`, { params });
-      return response.data;
-    } catch (apiError) {
-      // Fallback to local storage if API endpoint doesn't exist
-      console.warn('User verifications endpoint not available, using local storage');
-      
-      // Format local storage data to match expected API response
-      return {
-        verifications: localHistory,
-        total: localHistory.length,
-        page: 1,
-        limit: params.limit || 10
-      };
-    }
-  } catch (error) {
-    console.error('Failed to get user verifications:', error);
-    // Return empty result as final fallback
-    return {
-      verifications: [],
-      total: 0,
-      page: 1,
-      limit: params.limit || 10
-    };
-  }
-};
+    // Add optional parameters
+    Object.keys(options).forEach(key => {
+      formData.append(key, options[key]);
+    });
 
-// ==============================================================================
-// ADDITIONAL UTILITY FUNCTIONS
-// ==============================================================================
-
-// Function to check if a certificate exists in the ledger
-export const checkCertificateExists = async (certificateNumber) => {
-  try {
-    const certificate = await getCertificate(certificateNumber);
-    return !!certificate;
+    const response = await api.post('/verify/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    return response.data;
   } catch (error) {
-    return false;
-  }
-};
-
-// Function to get verification statistics for a specific certificate
-export const getCertificateVerificationStats = async (certificateNumber) => {
-  try {
-    const history = await getCertificateHistory(certificateNumber);
-    const verifications = history.filter(entry => entry.transaction_type === 'VERIFY');
-    
-    return {
-      total_verifications: verifications.length,
-      successful_verifications: verifications.filter(v => 
-        v.data?.verification_data?.result === 'valid' || 
-        v.data?.verification_data?.result === 'verified'
-      ).length,
-      last_verification: verifications[0]?.timestamp,
-      verification_methods: [...new Set(verifications.map(v => v.data?.verification_data?.verification_method))].filter(Boolean)
-    };
-  } catch (error) {
-    console.error('Failed to get verification stats:', error);
-    return {
-      total_verifications: 0,
-      successful_verifications: 0,
-      last_verification: null,
-      verification_methods: []
-    };
-  }
-};
-
-// Function to export certificate data as JSON
-export const exportCertificateData = async (certificateNumber) => {
-  try {
-    const [certificate, history] = await Promise.all([
-      getCertificate(certificateNumber),
-      getCertificateHistory(certificateNumber)
-    ]);
-    
-    const exportData = {
-      certificate,
-      history,
-      exported_at: new Date().toISOString(),
-      ledger_verified: true
-    };
-    
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `certificate_${certificateNumber}_export.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    toast.success('Certificate data exported successfully!');
-    return exportData;
-  } catch (error) {
-    console.error('Export failed:', error);
-    toast.error('Failed to export certificate data');
+    console.error('Verification failed:', error);
+    toast.error(error.response?.data?.detail || 'Verification failed');
     throw error;
   }
 };
 
-// Function to validate certificate data integrity
-export const validateCertificateIntegrity = async (certificateNumber) => {
+// ✅ Fixed batch verification function
+export const batchVerify = async (files, options = {}) => {
   try {
-    const [certificate, history, ledgerIntegrity] = await Promise.all([
-      getCertificate(certificateNumber),
-      getCertificateHistory(certificateNumber),
-      validateLedgerIntegrity()
-    ]);
+    console.log(`Starting batch verification of ${files.length} files`);
     
-    return {
-      certificate_exists: !!certificate,
-      history_available: history.length > 0,
-      ledger_valid: ledgerIntegrity.is_valid,
-      last_transaction: history[0]?.timestamp,
-      total_transactions: history.length,
-      integrity_score: ledgerIntegrity.is_valid && certificate && history.length > 0 ? 1.0 : 0.5
-    };
+    const formData = new FormData();
+    
+    // ✅ FIX: Add files with correct parameter name
+    files.forEach((file, index) => {
+      console.log(`Adding file ${index + 1}: ${file.name} (${file.size} bytes)`);
+      formData.append('files', file);  // FastAPI expects 'files' parameter
+    });
+    
+    // ✅ FIX: Add options as form fields (not JSON)
+    formData.append('use_enhanced_extraction', options.use_enhanced_extraction !== false ? 'true' : 'false');
+    formData.append('check_database', options.check_database !== false ? 'true' : 'false');
+    formData.append('continue_on_error', options.continue_on_error !== false ? 'true' : 'false');
+
+    console.log('FormData prepared, sending request...');
+
+    const response = await api.post('/verify/batch', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 300000, // 5 minutes timeout for batch operations
+    });
+    
+    console.log('Batch verification completed:', response.data);
+    return response.data;
   } catch (error) {
-    console.error('Integrity validation failed:', error);
-    return {
-      certificate_exists: false,
-      history_available: false,
-      ledger_valid: false,
-      last_transaction: null,
-      total_transactions: 0,
-      integrity_score: 0.0
-    };
+    console.error('Batch verification failed:', error);
+    
+    // Provide more specific error information
+    if (error.response) {
+      const errorMsg = error.response.data?.detail || 'Batch verification failed';
+      toast.error(`Batch verification failed: ${errorMsg}`);
+      throw new Error(errorMsg);
+    } else if (error.request) {
+      toast.error('Network error: Could not reach verification service');
+      throw new Error('Network error');
+    } else {
+      toast.error('Unexpected error during batch verification');
+      throw error;
+    }
   }
 };
 
-// Export the API instance for direct use if needed
+// ✅ Enhanced: Individual verification fallback function
+export const batchVerifyFallback = async (files, options = {}) => {
+  try {
+    console.log(`Starting individual verification fallback for ${files.length} files`);
+    
+    const results = [];
+    let successful = 0;
+    let failed = 0;
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
+      
+      try {
+        const result = await verifyCertificate(file, {
+          use_enhanced_extraction: options.use_enhanced_extraction !== false,
+          check_database: options.check_database !== false
+        });
+        
+        results.push({
+          filename: file.name,
+          ...result
+        });
+        
+        if (result.verification_status === 'VERIFIED' || 
+            result.verification_status === 'VERIFIED_BY_DATA' ||
+            result.certificate_exists_in_ledger) {
+          successful++;
+        } else {
+          failed++;
+        }
+      } catch (error) {
+        console.error(`Failed to verify ${file.name}:`, error);
+        failed++;
+        results.push({
+          filename: file.name,
+          verification_status: 'ERROR',
+          message: error.message || 'Verification failed',
+          confidence: 0
+        });
+      }
+    }
+    
+    return {
+      total_processed: files.length,
+      successful,
+      failed,
+      results,
+      processing_time: 0,
+      message: `Individual verification completed: ${successful}/${files.length} successful`
+    };
+  } catch (error) {
+    console.error('Individual verification fallback failed:', error);
+    throw error;
+  }
+};
+
+export const extractHash = async (file, useEnhanced = true) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('use_enhanced', useEnhanced);
+
+    const response = await api.post('/verify/extract-hash', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Hash extraction failed:', error);
+    throw error;
+  }
+};
+
+export const verifyByHash = async (certificateNumber, providedHash) => {
+  try {
+    const formData = new FormData();
+    formData.append('certificate_number', certificateNumber);
+    formData.append('provided_hash', providedHash);
+
+    const response = await api.post('/verify/by-hash', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Hash verification failed:', error);
+    throw error;
+  }
+};
+
+// Statistics and reporting
+export const getStatistics = async () => {
+  try {
+    const response = await api.get('/certificates/stats/summary');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch statistics:', error);
+    throw error;
+  }
+};
+
+// ✅ Added missing ledger integrity validation function
+export const validateLedgerIntegrity = async () => {
+  try {
+    const response = await api.get('/ledger/integrity');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to validate ledger integrity:', error);
+    throw error;
+  }
+};
+
+// ✅ Added ledger integrity function (alias for validateLedgerIntegrity for AdminDashboard compatibility)
+export const getLedgerIntegrity = async () => {
+  try {
+    const response = await api.get('/ledger/integrity');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to get ledger integrity:', error);
+    throw error;
+  }
+};
+
+// ✅ Added ledger statistics function
+export const getLedgerStats = async () => {
+  try {
+    const response = await api.get('/ledger/stats');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch ledger stats:', error);
+    throw error;
+  }
+};
+
+// ✅ Added ledger entries function
+export const getLedgerEntries = async (params = {}) => {
+  try {
+    const response = await api.get('/ledger/entries', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch ledger entries:', error);
+    throw error;
+  }
+};
+
+// ✅ Added ledger history function for specific certificates
+export const getLedgerHistory = async (certificateNumber) => {
+  try {
+    const response = await api.get(`/ledger/history/${certificateNumber}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch ledger history:', error);
+    throw error;
+  }
+};
+
+export const getUserVerifications = async (userId, params = {}) => {
+  try {
+    // This is a mock function for user verifications
+    // In a real app, you'd have a specific endpoint for this
+    const response = await api.get(`/users/${userId}/verifications`, { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch user verifications:', error);
+    // Return empty array as fallback
+    return [];
+  }
+};
+
+// Export and import
+export const exportCertificates = async (format = 'json', filters = {}) => {
+  try {
+    const params = new URLSearchParams({
+      format,
+      ...filters
+    });
+
+    const response = await api.get(`/certificates/export?${params}`, {
+      responseType: 'blob'
+    });
+
+    // Create download link
+    const blob = new Blob([response.data], { 
+      type: format === 'json' ? 'application/json' : 'text/csv' 
+    });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `certificates_export_${new Date().toISOString().split('T')[0]}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    toast.success(`Certificates exported as ${format.toUpperCase()}`);
+    return true;
+  } catch (error) {
+    console.error('Export failed:', error);
+    toast.error(error.response?.data?.detail || 'Export failed');
+    throw error;
+  }
+};
+
+// Watermark and Hash Embedding
+export const embedHash = async (certificateNumber, options = {}) => {
+  try {
+    const response = await api.post(`/certificates/${certificateNumber}/embed-hash`, options);
+    return response.data;
+  } catch (error) {
+    console.error('Hash embedding failed:', error);
+    toast.error(error.response?.data?.detail || 'Hash embedding failed');
+    throw error;
+  }
+};
+
+export const addWatermark = async (certificateNumber, watermarkOptions) => {
+  try {
+    const response = await api.post(`/certificates/${certificateNumber}/watermark`, watermarkOptions);
+    return response.data;
+  } catch (error) {
+    console.error('Watermark addition failed:', error);
+    toast.error(error.response?.data?.detail || 'Watermark addition failed');
+    throw error;
+  }
+};
+
 export default api;

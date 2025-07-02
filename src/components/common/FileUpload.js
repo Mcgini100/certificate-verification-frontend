@@ -1,159 +1,207 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, File, X, AlertCircle } from 'lucide-react';
+import { Upload, X, File, CheckCircle } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 const FileUpload = ({ 
   onFilesSelect, 
-  multiple = false, 
-  accept = { 'image/*': ['.png', '.jpg', '.jpeg'], 'application/pdf': ['.pdf'] },
+  acceptedTypes = ['image/*', '.pdf'], 
+  maxFiles = 1, 
   maxSize = 10 * 1024 * 1024, // 10MB
   className = '',
-  disabled = false 
+  multiple = false,
+  placeholder = null
 }) => {
-  const [files, setFiles] = useState([]);
-  const [errors, setErrors] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
+    console.log('📁 Files dropped:', { acceptedFiles, rejectedFiles });
+
     // Handle rejected files
     if (rejectedFiles.length > 0) {
-      const newErrors = rejectedFiles.map(rejection => ({
-        file: rejection.file.name,
-        errors: rejection.errors.map(error => error.message)
-      }));
-      setErrors(newErrors);
-    } else {
-      setErrors([]);
+      rejectedFiles.forEach(({ file, errors }) => {
+        console.error(`❌ File ${file.name} rejected:`, errors);
+        errors.forEach(error => {
+          if (error.code === 'file-too-large') {
+            toast.error(`File ${file.name} is too large (max ${(maxSize / 1024 / 1024).toFixed(1)}MB)`);
+          } else if (error.code === 'file-invalid-type') {
+            toast.error(`File ${file.name} has invalid type`);
+          } else if (error.code === 'too-many-files') {
+            toast.error(`Too many files (max ${maxFiles})`);
+          } else {
+            toast.error(`File ${file.name}: ${error.message}`);
+          }
+        });
+      });
     }
 
-    // Handle accepted files
+    // Process accepted files
     if (acceptedFiles.length > 0) {
-      const newFiles = acceptedFiles.map(file => ({
-        file,
-        id: Math.random().toString(36).substr(2, 9),
+      // ✅ FIX: Handle both single and multiple file modes
+      let filesToAdd;
+      
+      if (multiple) {
+        // For batch mode: add to existing selection (up to maxFiles)
+        const combinedFiles = [...selectedFiles, ...acceptedFiles];
+        filesToAdd = combinedFiles.slice(0, maxFiles);
+        
+        if (combinedFiles.length > maxFiles) {
+          toast.warning(`Only first ${maxFiles} files will be processed`);
+        }
+      } else {
+        // For single mode: replace existing selection
+        filesToAdd = acceptedFiles.slice(0, 1);
+      }
+
+      // ✅ FIX: Create consistent file objects
+      const fileObjects = filesToAdd.map((file, index) => ({
+        id: `${Date.now()}_${index}`,
+        file: file,
         name: file.name,
         size: file.size,
         type: file.type,
         preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
       }));
 
-      if (multiple) {
-        setFiles(prev => [...prev, ...newFiles]);
-        onFilesSelect([...files, ...newFiles]);
-      } else {
-        setFiles(newFiles);
-        onFilesSelect(newFiles);
-      }
-    }
-  }, [files, multiple, onFilesSelect]);
+      console.log('✅ File objects created:', fileObjects.map(f => ({ name: f.name, size: f.size })));
 
-  const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
+      setSelectedFiles(fileObjects);
+      onFilesSelect(fileObjects);
+    }
+  }, [selectedFiles, maxFiles, maxSize, multiple, onFilesSelect]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept,
+    accept: acceptedTypes.reduce((acc, type) => {
+      if (type.startsWith('.')) {
+        // File extension
+        acc[`application/${type.slice(1)}`] = [type];
+      } else {
+        // MIME type
+        acc[type] = [];
+      }
+      return acc;
+    }, {}),
+    maxFiles: multiple ? maxFiles : 1,
     maxSize,
-    multiple,
-    disabled
+    multiple
   });
 
   const removeFile = (fileId) => {
-    const updatedFiles = files.filter(f => f.id !== fileId);
-    setFiles(updatedFiles);
+    const updatedFiles = selectedFiles.filter(f => f.id !== fileId);
+    setSelectedFiles(updatedFiles);
     onFilesSelect(updatedFiles);
-    
-    // Clean up preview URLs
-    const removedFile = files.find(f => f.id === fileId);
-    if (removedFile?.preview) {
-      URL.revokeObjectURL(removedFile.preview);
-    }
   };
 
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const clearAllFiles = () => {
+    // Clean up object URLs to prevent memory leaks
+    selectedFiles.forEach(fileObj => {
+      if (fileObj.preview) {
+        URL.revokeObjectURL(fileObj.preview);
+      }
+    });
+    setSelectedFiles([]);
+    onFilesSelect([]);
   };
 
   return (
     <div className={className}>
-      {/* Drop zone */}
+      {/* Dropzone */}
       <div
         {...getRootProps()}
-        className={`
-          dropzone
-          ${isDragActive ? 'active' : ''}
-          ${isDragReject ? 'rejected' : ''}
-          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-        `}
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          isDragActive
+            ? 'border-primary-500 bg-primary-50'
+            : 'border-secondary-300 hover:border-primary-400 hover:bg-secondary-50'
+        }`}
       >
         <input {...getInputProps()} />
-        <div className="flex flex-col items-center space-y-2">
-          <Upload className="h-12 w-12 text-secondary-400" />
-          <div className="text-center">
-            <p className="text-lg font-medium text-secondary-900">
-              {isDragActive ? 'Drop files here' : 'Drop files here or click to browse'}
+        
+        <Upload className="h-12 w-12 text-secondary-400 mx-auto mb-4" />
+        
+        {isDragActive ? (
+          <p className="text-primary-600 font-medium">Drop the files here...</p>
+        ) : (
+          <div>
+            <p className="text-secondary-700 font-medium mb-2">
+              {placeholder || (multiple 
+                ? `Drag & drop files here, or click to select (max ${maxFiles})`
+                : 'Drag & drop a file here, or click to select'
+              )}
             </p>
             <p className="text-sm text-secondary-500">
-              Supports PNG, JPG, JPEG, PDF (max {formatFileSize(maxSize)})
+              Supported: {acceptedTypes.join(', ')} • Max size: {(maxSize / 1024 / 1024).toFixed(1)}MB
             </p>
+            {multiple && (
+              <p className="text-xs text-secondary-400 mt-1">
+                Hold Ctrl (Windows) or Cmd (Mac) to select multiple files
+              </p>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Error messages */}
-      {errors.length > 0 && (
-        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-center space-x-2 mb-2">
-            <AlertCircle className="h-5 w-5 text-red-600" />
-            <h4 className="text-sm font-medium text-red-800">Upload Errors</h4>
+      {/* Selected Files List */}
+      {selectedFiles.length > 0 && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-medium text-secondary-900">
+              Selected Files ({selectedFiles.length}{multiple ? `/${maxFiles}` : ''})
+            </h4>
+            {multiple && selectedFiles.length > 1 && (
+              <button
+                onClick={clearAllFiles}
+                className="text-xs text-red-600 hover:text-red-800 transition-colors"
+              >
+                Clear All
+              </button>
+            )}
           </div>
-          {errors.map((error, index) => (
-            <div key={index} className="text-sm text-red-700">
-              <span className="font-medium">{error.file}:</span> {error.errors.join(', ')}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* File list */}
-      {files.length > 0 && (
-        <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-medium text-secondary-900">
-            Selected Files ({files.length})
-          </h4>
-          {files.map((fileItem) => (
-            <div
-              key={fileItem.id}
-              className="flex items-center justify-between p-3 bg-secondary-50 border border-secondary-200 rounded-lg"
-            >
-              <div className="flex items-center space-x-3">
-                {fileItem.preview ? (
-                  <img
-                    src={fileItem.preview}
-                    alt={fileItem.name}
-                    className="h-10 w-10 object-cover rounded"
-                  />
-                ) : (
-                  <File className="h-10 w-10 text-secondary-400" />
-                )}
-                <div>
-                  <p className="text-sm font-medium text-secondary-900">
-                    {fileItem.name}
+          
+          <div className="space-y-2">
+            {selectedFiles.map((fileObj) => (
+              <div
+                key={fileObj.id}
+                className="flex items-center space-x-3 p-3 bg-secondary-50 rounded-lg"
+              >
+                {/* File Icon/Preview */}
+                <div className="flex-shrink-0">
+                  {fileObj.preview ? (
+                    <img
+                      src={fileObj.preview}
+                      alt={fileObj.name}
+                      className="h-10 w-10 object-cover rounded"
+                    />
+                  ) : (
+                    <File className="h-10 w-10 text-secondary-400" />
+                  )}
+                </div>
+                
+                {/* File Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-secondary-900 truncate">
+                    {fileObj.name}
                   </p>
                   <p className="text-xs text-secondary-500">
-                    {formatFileSize(fileItem.size)}
+                    {(fileObj.size / 1024 / 1024).toFixed(2)} MB • {fileObj.type || 'Unknown type'}
                   </p>
                 </div>
+                
+                {/* Status */}
+                <div className="flex-shrink-0">
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                </div>
+                
+                {/* Remove Button */}
+                <button
+                  onClick={() => removeFile(fileObj.id)}
+                  className="flex-shrink-0 p-1 text-secondary-400 hover:text-red-500 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                onClick={() => removeFile(fileItem.id)}
-                className="p-1 text-secondary-400 hover:text-red-600 transition-colors"
-                disabled={disabled}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
