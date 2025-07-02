@@ -55,6 +55,9 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Helper function to safely convert strings to uppercase
+  const safeToUpperCase = (str) => (str || '').toUpperCase();
+
   const fetchDashboardData = async () => {
     try {
       const [
@@ -64,18 +67,27 @@ const AdminDashboard = () => {
         healthData,
         recentTxData
       ] = await Promise.all([
-        getStatistics(),
-        getLedgerStats(),
-        getLedgerIntegrity(),
-        getSystemHealth(),
+        getStatistics().catch(() => null),
+        getLedgerStats().catch(() => null),
+        getLedgerIntegrity().catch(() => null),
+        getSystemHealth().catch(() => null),
         getLedgerEntries({ limit: 10, offset: 0 }).catch(() => ({ entries: [] }))
       ]);
 
+      // Handle API response structures
       setStats(statisticsData);
-      setLedgerStats(ledgerStatsData);
-      setLedgerIntegrity(integrityData);
+      
+      // Handle ledgerStats response (API returns {status: "success", stats: {...}})
+      setLedgerStats(ledgerStatsData?.stats || ledgerStatsData);
+      
+      // Handle ledgerIntegrity response (API returns {status: "success", integrity: {...}})
+      setLedgerIntegrity(integrityData?.integrity || integrityData);
+      
+      // Handle systemHealth response (API returns {status: "healthy", ...})
       setSystemHealth(healthData);
-      setRecentTransactions(recentTxData.entries || []);
+      
+      // Handle recentTransactions
+      setRecentTransactions(recentTxData?.entries || recentTxData || []);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
       toast.error('Failed to load dashboard data');
@@ -100,12 +112,15 @@ const AdminDashboard = () => {
   const handleValidateLedger = async () => {
     try {
       const result = await validateLedgerIntegrity();
-      if (result.is_valid) {
+      // Handle response structure {status: "success", integrity: {...}}
+      const integrity = result?.integrity || result;
+      
+      if (integrity?.is_valid) {
         toast.success('Ledger integrity validation passed!');
       } else {
         toast.error('Ledger integrity validation failed!');
       }
-      setLedgerIntegrity(result);
+      setLedgerIntegrity(integrity);
     } catch (error) {
       toast.error('Failed to validate ledger integrity');
     }
@@ -121,7 +136,7 @@ const AdminDashboard = () => {
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-  // Prepare chart data
+  // Prepare chart data with safe data handling
   const verificationData = stats?.certificates?.verification_stats ? [
     { name: 'Verified', value: stats.certificates.verification_stats.verified || 0, color: '#10B981' },
     { name: 'Failed', value: stats.certificates.verification_stats.failed || 0, color: '#EF4444' },
@@ -130,8 +145,8 @@ const AdminDashboard = () => {
 
   const transactionTrends = ledgerStats?.transaction_types ? 
     Object.entries(ledgerStats.transaction_types).map(([type, count]) => ({
-      name: type.replace('_', ' ').toUpperCase(),
-      value: count
+      name: safeToUpperCase((type || '').replace('_', ' ')),
+      value: count || 0
     })) : [];
 
   return (
@@ -171,23 +186,23 @@ const AdminDashboard = () => {
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className={`p-4 rounded-lg border-l-4 ${
-            systemHealth.overall_status === 'healthy'
+            systemHealth.status === 'healthy'
               ? 'bg-green-50 border-green-400 text-green-800'
-              : systemHealth.overall_status === 'degraded'
+              : systemHealth.status === 'degraded'
               ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
               : 'bg-red-50 border-red-400 text-red-800'
           }`}
         >
           <div className="flex items-center space-x-2">
-            {systemHealth.overall_status === 'healthy' ? (
+            {systemHealth.status === 'healthy' ? (
               <CheckCircle2 className="w-5 h-5" />
-            ) : systemHealth.overall_status === 'degraded' ? (
+            ) : systemHealth.status === 'degraded' ? (
               <AlertTriangle className="w-5 h-5" />
             ) : (
               <AlertCircle className="w-5 h-5" />
             )}
             <span className="font-medium">
-              System Status: {systemHealth.overall_status.toUpperCase()}
+              System Status: {safeToUpperCase(systemHealth?.status) || 'UNKNOWN'}
             </span>
             {ledgerIntegrity && (
               <span className="text-sm">
@@ -213,7 +228,7 @@ const AdminDashboard = () => {
                 Total Certificates
               </p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                {stats?.certificates?.total_certificates || 0}
+                {ledgerStats?.unique_certificates || stats?.certificates?.total_certificates || 0}
               </p>
             </div>
             <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
@@ -223,7 +238,7 @@ const AdminDashboard = () => {
           <div className="mt-4 flex items-center text-sm">
             <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
             <span className="text-green-600 dark:text-green-400">
-              {stats?.certificates?.recent_uploads || 0} this week
+              {ledgerStats?.active_certificates || stats?.certificates?.recent_uploads || 0} active
             </span>
           </div>
         </motion.div>
@@ -324,7 +339,7 @@ const AdminDashboard = () => {
           <div className="mt-4 flex items-center text-sm">
             <Hash className="w-4 h-4 text-gray-500 mr-1" />
             <span className="text-gray-600 dark:text-gray-400">
-              {ledgerStats?.unique_certificates || 0} unique certs
+              {ledgerIntegrity?.unique_certificates || 0} unique certs
             </span>
           </div>
         </motion.div>
@@ -343,25 +358,31 @@ const AdminDashboard = () => {
             Verification Status Distribution
           </h3>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={verificationData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {verificationData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            {verificationData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={verificationData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {verificationData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                No verification data available
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -376,21 +397,27 @@ const AdminDashboard = () => {
             Ledger Transaction Types
           </h3>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={transactionTrends}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="name" 
-                  tick={{ fontSize: 12 }}
-                  angle={-45}
-                  textAnchor="end"
-                  height={60}
-                />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="value" fill="#3B82F6" />
-              </BarChart>
-            </ResponsiveContainer>
+            {transactionTrends.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={transactionTrends}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="name" 
+                    tick={{ fontSize: 12 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#3B82F6" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                No transaction data available
+              </div>
+            )}
           </div>
         </motion.div>
       </div>
@@ -442,7 +469,7 @@ const AdminDashboard = () => {
                 recentTransactions.map((transaction, index) => (
                   <tr key={transaction.transaction_id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">
-                      {transaction.transaction_id?.substring(0, 8)}...
+                      {transaction.transaction_id?.substring(0, 8) || 'N/A'}...
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -454,17 +481,17 @@ const AdminDashboard = () => {
                           ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
                           : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                       }`}>
-                        {transaction.transaction_type}
+                        {safeToUpperCase(transaction.transaction_type) || 'UNKNOWN'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                       {transaction.certificate_number || 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                      #{transaction.block_number}
+                      #{transaction.block_number || 0}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {new Date(transaction.timestamp).toLocaleString()}
+                      {transaction.timestamp ? new Date(transaction.timestamp).toLocaleString() : 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -508,7 +535,7 @@ const AdminDashboard = () => {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
-                {ledgerIntegrity.total_entries}
+                {ledgerIntegrity.total_entries || 0}
               </p>
             </div>
             <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -519,7 +546,7 @@ const AdminDashboard = () => {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
-                {ledgerIntegrity.unique_certificates}
+                {ledgerIntegrity.unique_certificates || 0}
               </p>
             </div>
             <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -530,7 +557,7 @@ const AdminDashboard = () => {
                 </span>
               </div>
               <p className="text-sm font-mono text-gray-600 dark:text-gray-400 mt-2 truncate">
-                {ledgerIntegrity.last_hash?.substring(0, 16)}...
+                {ledgerIntegrity.last_hash?.substring(0, 16) || 'N/A'}...
               </p>
             </div>
           </div>
@@ -545,7 +572,7 @@ const AdminDashboard = () => {
                     key={type}
                     className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                   >
-                    {type}: {count}
+                    {safeToUpperCase(type) || 'UNKNOWN'}: {count || 0}
                   </span>
                 ))}
               </div>

@@ -101,15 +101,6 @@ const LoginPage = () => {
             </p>
           </div>
 
-          {/* Demo Credentials */}
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <h4 className="text-sm font-medium text-blue-800 mb-2">Demo Credentials:</h4>
-            <div className="text-xs text-blue-700 space-y-1">
-              <div><strong>Admin:</strong> admin@admin.com / admin123</div>
-              <div><strong>User:</strong> user@user.com / user123</div>
-            </div>
-          </div>
-
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email */}
@@ -162,9 +153,9 @@ const LoginPage = () => {
                   className="absolute inset-y-0 right-0 pr-3 flex items-center"
                 >
                   {showPassword ? (
-                    <EyeOff className="h-5 w-5 text-secondary-400 hover:text-secondary-600" />
+                    <EyeOff className="h-5 w-5 text-secondary-400" />
                   ) : (
-                    <Eye className="h-5 w-5 text-secondary-400 hover:text-secondary-600" />
+                    <Eye className="h-5 w-5 text-secondary-400" />
                   )}
                 </button>
               </div>
@@ -173,35 +164,58 @@ const LoginPage = () => {
               )}
             </div>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full btn-primary flex items-center justify-center py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <LoadingSpinner size="small" className="mr-2" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
-            </button>
-          </form>
+            {/* Remember me and forgot password */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <input
+                  id="remember-me"
+                  name="remember-me"
+                  type="checkbox"
+                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-secondary-300 rounded"
+                />
+                <label htmlFor="remember-me" className="ml-2 block text-sm text-secondary-900">
+                  Remember me
+                </label>
+              </div>
 
-          {/* Footer */}
-          <div className="mt-6 text-center">
-            <p className="text-sm text-secondary-600">
-              Don't have an account?{' '}
-              <Link
-                to="/signup"
-                className="font-medium text-primary-600 hover:text-primary-500 transition-colors"
+              <div className="text-sm">
+                <Link
+                  to="/forgot-password"
+                  className="font-medium text-primary-600 hover:text-primary-500"
+                >
+                  Forgot your password?
+                </Link>
+              </div>
+            </div>
+
+            {/* Submit button */}
+            <div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Sign up here
-              </Link>
-            </p>
-          </div>
+                {loading ? (
+                  <LoadingSpinner size="small" color="white" />
+                ) : (
+                  'Sign In'
+                )}
+              </button>
+            </div>
+
+            {/* Sign up link */}
+            <div className="text-center">
+              <p className="text-sm text-secondary-600">
+                Don't have an account?{' '}
+                <Link
+                  to="/signup"
+                  className="font-medium text-primary-600 hover:text-primary-500"
+                >
+                  Sign up here
+                </Link>
+              </p>
+            </div>
+          </form>
         </motion.div>
       </div>
     </div>

@@ -3,7 +3,6 @@ import {
   Search, 
   Filter, 
   Download, 
-  Trash2, 
   Eye, 
   ChevronDown,
   ChevronLeft,
@@ -13,7 +12,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getCertificates, deleteCertificate, getCertificateHistory, downloadProcessedCertificate, downloadOriginalCertificate } from '../../services/api';
+import { getCertificates, getCertificateHistory, downloadProcessedCertificate, downloadOriginalCertificate } from '../../services/api';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import Modal from '../../components/common/Modal';
 import { toast } from 'react-toastify';
@@ -44,7 +43,6 @@ const AdminDatabase = () => {
   const [certHistory, setCertHistory] = useState([]);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -149,24 +147,6 @@ const AdminDatabase = () => {
     setShowDetailsModal(true);
   };
 
-  const handleDeleteCert = (cert) => {
-    setSelectedCert(cert);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDelete = async () => {
-    try {
-      await deleteCertificate(selectedCert.certificate_number);
-      toast.success('Certificate deleted successfully');
-      fetchCertificates();
-      setShowDeleteModal(false);
-      setSelectedCert(null);
-    } catch (error) {
-      console.error('Failed to delete certificate:', error);
-      toast.error('Failed to delete certificate');
-    }
-  };
-
   const handleDownloadProcessed = async (cert) => {
     try {
       await downloadProcessedCertificate(cert.certificate_number, {
@@ -226,86 +206,55 @@ const AdminDatabase = () => {
     
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClasses[status] || 'bg-gray-100 text-gray-800'}`}>
-        {status?.replace('_', ' ') || 'Unknown'}
+        {status}
       </span>
     );
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleString();
   };
 
-  if (loading && currentPage === 1) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center min-h-[400px]">
         <LoadingSpinner size="large" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      {/* API Connection Status */}
-      {!apiConnected && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between"
-        >
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
-            <div>
-              <p className="text-yellow-800 font-medium">API Connection Failed</p>
-              <p className="text-yellow-700 text-sm">Unable to fetch certificates. Check if the backend is running.</p>
-            </div>
-          </div>
-          <button
-            onClick={refreshData}
-            className="px-4 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 rounded-md text-sm font-medium transition-colors"
-          >
-            Retry Connection
-          </button>
-        </motion.div>
-      )}
-
+    <div className="space-y-6">
       {/* Header */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-8"
+        className="flex justify-between items-center"
       >
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-secondary-900">Certificate Database</h1>
-            <p className="text-secondary-600 mt-2">
-              {totalCount > 0 ? `${totalCount} certificates in the system` : 'No certificates found'}
-            </p>
-          </div>
-          <div className="flex space-x-3">
-            <button
-              onClick={refreshData}
-              className="btn-secondary flex items-center"
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              onClick={exportCertificates}
-              className="btn-secondary flex items-center"
-              disabled={!apiConnected || certificates.length === 0}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </button>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-secondary-900">Certificate Database</h1>
+          <p className="text-secondary-600 mt-1">
+            {apiConnected ? `${totalCount} certificates in the system` : 'No certificates found'}
+          </p>
+        </div>
+        <div className="flex space-x-3">
+          <button
+            onClick={refreshData}
+            className="btn-secondary flex items-center"
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <button
+            onClick={exportCertificates}
+            className="btn-secondary flex items-center"
+            disabled={!apiConnected || certificates.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </button>
         </div>
       </motion.div>
 
@@ -381,7 +330,7 @@ const AdminDatabase = () => {
         {certificates.length > 0 ? (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-secondary-200">
+              <table className="w-full">
                 <thead className="bg-secondary-50">
                   <tr>
                     <th 
@@ -429,7 +378,7 @@ const AdminDatabase = () => {
                     <th 
                       className="px-6 py-3 text-left text-xs font-medium text-secondary-500 uppercase tracking-wider cursor-pointer hover:bg-secondary-100"
                       onClick={() => {
-                        const newOrder = sortBy === 'created_at' && sortOrder === 'asc' ? 'desc' : 'asc';
+                        const newOrder = sortBy === 'created_at' && sortOrder === 'desc' ? 'asc' : 'desc';
                         setSortBy('created_at');
                         setSortOrder(newOrder);
                       }}
@@ -474,35 +423,37 @@ const AdminDatabase = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-secondary-900">
-                          {cert.confidence ? `${Math.round(cert.confidence * 100)}%` : 'Unknown'}
+                          {cert.confidence ? 
+                            `${Math.round(cert.confidence * 100)}%` : 
+                            'N/A'
+                          }
                         </div>
-                        <div className="w-full bg-secondary-200 rounded-full h-1.5 mt-1">
-                          <div 
-                            className="bg-primary-600 h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${(cert.confidence || 0) * 100}%` }}
-                          ></div>
-                        </div>
+                        {cert.confidence && (
+                          <div className="w-full bg-secondary-200 rounded-full h-2 mt-1">
+                            <div 
+                              className="bg-blue-600 h-2 rounded-full" 
+                              style={{ width: `${cert.confidence * 100}%` }}
+                            ></div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-secondary-500">
                         {formatDate(cert.created_at)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end space-x-2">
+                        <div className="flex items-center justify-end space-x-2">
                           <button
                             onClick={() => handleViewDetails(cert)}
-                            className="text-primary-600 hover:text-primary-900"
+                            className="text-indigo-600 hover:text-indigo-900"
                             title="View Details"
                           >
                             <Eye className="h-4 w-4" />
                           </button>
                           <div className="relative group">
-                            <button
-                              className="text-blue-600 hover:text-blue-900"
-                              title="Download Options"
-                            >
+                            <button className="text-blue-600 hover:text-blue-900" title="Download">
                               <Download className="h-4 w-4" />
                             </button>
-                            <div className="absolute right-0 top-6 hidden group-hover:block bg-white border border-secondary-200 rounded-lg shadow-lg z-10 min-w-48">
+                            <div className="absolute right-0 top-6 hidden group-hover:block bg-white border border-secondary-200 rounded-lg shadow-lg z-10 w-48">
                               <button
                                 onClick={() => handleDownloadProcessed(cert)}
                                 className="block w-full text-left px-4 py-2 text-sm text-secondary-700 hover:bg-secondary-50 rounded-t-lg"
@@ -525,13 +476,6 @@ const AdminDatabase = () => {
                               </button>
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleDeleteCert(cert)}
-                            className="text-red-600 hover:text-red-900"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -583,13 +527,11 @@ const AdminDatabase = () => {
                 </div>
               ) : searchTerm || statusFilter !== 'all' ? (
                 <div>
-                  <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg">No certificates match your search criteria</p>
                   <p className="text-sm">Try adjusting your filters or search terms</p>
                 </div>
               ) : (
                 <div>
-                  <RefreshCw className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg">No certificates found</p>
                   <p className="text-sm">Upload some certificates to get started</p>
                 </div>
@@ -604,87 +546,68 @@ const AdminDatabase = () => {
         isOpen={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
         title={`Certificate Details - ${selectedCert?.certificate_number}`}
-        size="4xl"
+        size="xl"
       >
         {selectedCert && (
-          <div className="space-y-6 max-h-[80vh] overflow-y-auto">
-            {/* Certificate Data */}
-            <div>
-              <h4 className="text-lg font-medium text-secondary-900 mb-3">Certificate Information</h4>
-              <div className="space-y-3">
-                {selectedCert.certificate_data && Object.entries(selectedCert.certificate_data).map(([key, value]) => (
-                  value && (
-                    <div key={key} className="bg-secondary-50 rounded-lg p-3">
-                      <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">{key}</dt>
-                      <dd className="text-sm text-secondary-900 break-words">{safeRenderValue(value)}</dd>
-                    </div>
-                  )
-                ))}
+          <div className="space-y-6">
+            {/* Basic Information */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-lg font-medium text-secondary-900 mb-3">Certificate Information</h3>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Certificate Number:</strong> {selectedCert.certificate_number}</div>
+                  <div><strong>Status:</strong> {getStatusBadge(selectedCert.verification_status)}</div>
+                  <div><strong>Confidence:</strong> {selectedCert.confidence ? `${Math.round(selectedCert.confidence * 100)}%` : 'N/A'}</div>
+                  <div><strong>Created:</strong> {formatDate(selectedCert.created_at)}</div>
+                  <div><strong>Hash:</strong> <span className="font-mono text-xs break-all">{selectedCert.hash || 'N/A'}</span></div>
+                </div>
               </div>
-            </div>
 
-            {/* Technical Details */}
-            <div>
-              <h4 className="text-lg font-medium text-secondary-900 mb-3">Technical Details</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-secondary-50 rounded-lg p-3">
-                  <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">Status</dt>
-                  <dd>{getStatusBadge(selectedCert.verification_status)}</dd>
-                </div>
-                <div className="bg-secondary-50 rounded-lg p-3">
-                  <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">Confidence</dt>
-                  <dd className="text-sm text-secondary-900">{selectedCert.confidence ? `${Math.round(selectedCert.confidence * 100)}%` : 'Unknown'}</dd>
-                </div>
-                <div className="bg-secondary-50 rounded-lg p-3 md:col-span-2">
-                  <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">Hash</dt>
-                  <dd className="text-xs font-mono text-secondary-900 break-all bg-white p-2 rounded border">
-                    {selectedCert.hash || 'Not available'}
-                  </dd>
-                </div>
-                <div className="bg-secondary-50 rounded-lg p-3">
-                  <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">Source Image</dt>
-                  <dd className="text-sm text-secondary-900 break-words">{selectedCert.source_image || 'Unknown'}</dd>
-                </div>
-                <div className="bg-secondary-50 rounded-lg p-3">
-                  <dt className="text-xs font-medium text-secondary-500 uppercase tracking-wide mb-1">Created</dt>
-                  <dd className="text-sm text-secondary-900">{formatDate(selectedCert.created_at)}</dd>
+              <div>
+                <h3 className="text-lg font-medium text-secondary-900 mb-3">Student Information</h3>
+                <div className="space-y-2 text-sm">
+                  {selectedCert.certificate_data && Object.entries(selectedCert.certificate_data).map(([key, value]) => (
+                    <div key={key}>
+                      <strong>{key}:</strong> {safeRenderValue(value)}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
 
             {/* Verification History */}
             <div>
-              <h4 className="text-lg font-medium text-secondary-900 mb-3">Verification History</h4>
+              <h3 className="text-lg font-medium text-secondary-900 mb-3">Verification History</h3>
               {loadingHistory ? (
                 <div className="flex justify-center py-4">
-                  <LoadingSpinner />
+                  <LoadingSpinner size="small" />
                 </div>
               ) : certHistory.length > 0 ? (
-                <div className="space-y-3 max-h-60 overflow-y-auto">
+                <div className="space-y-3 max-h-64 overflow-y-auto">
                   {certHistory.map((entry, index) => (
-                    <div key={index} className="bg-secondary-50 rounded-lg p-4">
-                      <div className="flex flex-col space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            {getStatusBadge(entry.status)}
-                            <span className="text-sm text-secondary-600">
-                              {entry.confidence ? `${Math.round(entry.confidence * 100)}% confidence` : ''}
-                            </span>
-                          </div>
-                          <div className="text-xs text-secondary-500">
-                            {formatDate(entry.timestamp)}
-                          </div>
+                    <div key={index} className="border border-secondary-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${entry.status === 'VERIFIED' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {entry.status}
+                          </span>
+                          <span className="text-xs text-secondary-500">
+                            {entry.confidence ? `${Math.round(entry.confidence * 100)}% confidence` : ''}
+                          </span>
                         </div>
-                        {entry.message && (
-                          <p className="text-sm text-secondary-700 break-words">{entry.message}</p>
+                        <div className="text-xs text-secondary-500">
+                          {formatDate(entry.timestamp)}
+                        </div>
+                      </div>
+                      {entry.message && (
+                        <p className="text-sm text-secondary-700 break-words">{entry.message}</p>
+                      )}
+                      <div className="text-xs text-secondary-500 space-y-1">
+                        <div>Source: <span className="font-mono">{entry.source}</span></div>
+                        <div>IP: <span className="font-mono">{entry.ip_address}</span></div>
+                        {entry.user_agent && (
+                          <div>User Agent: <span className="font-mono text-xs break-all">{entry.user_agent}</span></div>
                         )}
-                        <div className="text-xs text-secondary-500 space-y-1">
-                          <div>Source: <span className="font-mono">{entry.source}</span></div>
-                          <div>IP: <span className="font-mono">{entry.ip_address}</span></div>
-                          {entry.user_agent && (
-                            <div>User Agent: <span className="font-mono text-xs break-all">{entry.user_agent}</span></div>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ))}
@@ -697,34 +620,6 @@ const AdminDatabase = () => {
             </div>
           </div>
         )}
-      </Modal>
-
-      {/* Delete Confirmation Modal */}
-      <Modal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        title="Confirm Deletion"
-      >
-        <div className="space-y-4">
-          <p className="text-secondary-600">
-            Are you sure you want to delete certificate <strong>{selectedCert?.certificate_number}</strong>? 
-            This action cannot be undone.
-          </p>
-          <div className="flex justify-end space-x-3">
-            <button
-              onClick={() => setShowDeleteModal(false)}
-              className="btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={confirmDelete}
-              className="btn-danger"
-            >
-              Delete Certificate
-            </button>
-          </div>
-        </div>
       </Modal>
 
       {/* Advanced Filters Modal */}
